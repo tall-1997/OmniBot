@@ -2,6 +2,7 @@ package cn.com.omnimind.bot.ui.channel
 
 import android.app.Activity
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -196,10 +197,15 @@ class McCloudAccountChannel : EventChannel.StreamHandler {
                 completeAuthentication(service, service.account.status())
             }
             "getThirdPartyLoginCapabilities" -> launch(result) {
+                val alipayAvailable = activity != null && isPackageInstalled(ALIPAY_PACKAGE)
                 mapOf(
                     "alipay" to mapOf(
-                        "available" to (activity != null),
-                        "reason" to if (activity == null) "当前没有可用的 Activity" else "",
+                        "available" to alipayAvailable,
+                        "reason" to when {
+                            activity == null -> "当前没有可用的 Activity"
+                            !alipayAvailable -> "当前设备未安装支付宝"
+                            else -> ""
+                        },
                     ),
                     "douyin" to mapOf(
                         "available" to false,
@@ -465,6 +471,17 @@ class McCloudAccountChannel : EventChannel.StreamHandler {
         )
     }
 
+    private fun isPackageInstalled(packageName: String): Boolean {
+        val appContext = context ?: return false
+        return try {
+            @Suppress("DEPRECATION")
+            appContext.packageManager.getPackageInfo(packageName, 0)
+            true
+        } catch (_: PackageManager.NameNotFoundException) {
+            false
+        }
+    }
+
     private fun MethodCall.localFile(name: String): File {
         val file = File(requiredString(name))
         require(file.isFile) { "$name is not a file" }
@@ -489,6 +506,7 @@ class McCloudAccountChannel : EventChannel.StreamHandler {
         private const val TAG = "McCloudAccountChannel"
         private const val METHOD_CHANNEL = "cn.com.omnimind.bot/McCloudAccount"
         private const val EVENT_CHANNEL = "cn.com.omnimind.bot/McCloudAccountEvents"
+        private const val ALIPAY_PACKAGE = "com.eg.android.AlipayGphone"
     }
 }
 

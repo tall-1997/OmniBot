@@ -35,6 +35,16 @@ void main() {
     );
   });
 
+  test('recognizes only cloud pages that require an active session', () {
+    expect(isMcCloudProtectedLocation('/my/account/cloud-models'), isTrue);
+    expect(
+      isMcCloudProtectedLocation('/my/account/cloud-tasks/task-1?tab=logs'),
+      isTrue,
+    );
+    expect(isMcCloudProtectedLocation('/my/account'), isFalse);
+    expect(isMcCloudProtectedLocation('/home/chat'), isFalse);
+  });
+
   test('parses session and dashboard payloads into typed models', () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {

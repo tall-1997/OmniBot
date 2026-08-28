@@ -20,6 +20,7 @@ import 'package:ui/widgets/omnibot_error_widget.dart';
 
 import 'core/router/go_router_manager.dart';
 import 'services/event_bus.dart';
+import 'services/mc_cloud_service.dart';
 
 Future<void> bootstrapMain(List<String> args) async {
   String? initialRoute;
@@ -135,6 +136,7 @@ class MyApp extends ConsumerStatefulWidget {
 
 class _MyAppState extends ConsumerState<MyApp> {
   late final GoRouter _router;
+  StreamSubscription<McCloudEvent>? _mcCloudEvents;
 
   @override
   void initState() {
@@ -143,10 +145,29 @@ class _MyAppState extends ConsumerState<MyApp> {
     final initStart = DateTime.now();
     debugPrint('🎨 [FlutterStartup] MyApp initState start');
     _router = GoRouterManager.createRouter(ref);
+    _mcCloudEvents = McCloudService.events.listen(
+      _handleMcCloudEvent,
+      onError: (Object error) {
+        debugPrint('[McCloud] event stream failed: $error');
+      },
+    );
     _initializeApp();
     debugPrint(
       "⏱️  [FlutterStartup] MyApp initState cost: ${DateTime.now().difference(initStart).inMilliseconds}ms",
     );
+  }
+
+  void _handleMcCloudEvent(McCloudEvent event) {
+    if (event is! McSessionExpiredEvent) return;
+    final location = _router.routeInformationProvider.value.uri.toString();
+    if (isMcCloudProtectedLocation(location)) _router.go('/my/account');
+  }
+
+  @override
+  void dispose() {
+    _mcCloudEvents?.cancel();
+    _router.dispose();
+    super.dispose();
   }
 
   Future<void> _initializeApp() async {

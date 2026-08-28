@@ -11,6 +11,12 @@ bool isMcCloudOAuthCallbackUrl(String value) {
       RegExp(r'^/api/v1/(users/)?oauth/[a-z0-9_-]+/callback$').hasMatch(path);
 }
 
+bool isMcCloudProtectedLocation(String location) =>
+    location.startsWith('/my/account/git-identities') ||
+    location.startsWith('/my/account/cloud-models') ||
+    location.startsWith('/my/account/cloud-projects') ||
+    location.startsWith('/my/account/cloud-tasks/');
+
 class McCloudPage<T> {
   const McCloudPage(this.items, {this.nextCursor, this.hasMore = false});
 
