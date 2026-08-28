@@ -47,6 +47,7 @@ class _AccountPageState extends State<AccountPage>
   int _countdown = 0;
   Timer? _timer;
   String? _error;
+  int _loadGeneration = 0;
   final _wechatStatus = ValueNotifier<String>('waiting');
   BuildContext? _wechatDialogContext;
   Map<String, String?> _thirdPartyUnavailable = const {
@@ -81,6 +82,7 @@ class _AccountPageState extends State<AccountPage>
   }
 
   Future<void> _load() async {
+    final generation = ++_loadGeneration;
     setState(() {
       _loading = true;
       _error = null;
@@ -101,7 +103,7 @@ class _AccountPageState extends State<AccountPage>
         else
           Future.value(null),
       ]);
-      if (mounted)
+      if (mounted && generation == _loadGeneration)
         setState(() {
           _session = session;
           _dashboard = results[0] as McCloudDashboard?;
@@ -111,9 +113,13 @@ class _AccountPageState extends State<AccountPage>
             _thirdPartyUnavailable = _capabilityReasons(capabilities);
         });
     } catch (error) {
-      if (mounted) setState(() => _error = _message(error));
+      if (mounted && generation == _loadGeneration) {
+        setState(() => _error = _message(error));
+      }
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && generation == _loadGeneration) {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -195,6 +201,7 @@ class _AccountPageState extends State<AccountPage>
           title: 'GitHub',
           appBarBackClosesPage: true,
           onNavigationUrl: (callbackUrl) async {
+            if (!isMcCloudOAuthCallbackUrl(callbackUrl)) return false;
             var completed = false;
             try {
               completed = await McCloudService.completeGithubLogin(callbackUrl);
@@ -219,6 +226,7 @@ class _AccountPageState extends State<AccountPage>
   });
 
   Future<void> _wechat() => _run(() async {
+    _wechatStatus.value = 'waiting';
     final dataUrl = await McCloudService.startWechatLogin();
     if (!mounted) return;
     final comma = dataUrl.indexOf(',');
@@ -289,6 +297,7 @@ class _AccountPageState extends State<AccountPage>
       _closeWechatDialog();
       setState(() => _error = event.message);
     } else if (event is McSessionExpiredEvent) {
+      _loadGeneration++;
       setState(() {
         _session = const McCloudSession(signedIn: false);
         _dashboard = null;

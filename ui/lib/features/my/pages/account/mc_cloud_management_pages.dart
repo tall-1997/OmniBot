@@ -181,6 +181,7 @@ class _McCloudGitIdentitiesPageState
           title: '$platform OAuth',
           appBarBackClosesPage: true,
           onNavigationUrl: (url) async {
+            if (!isMcCloudOAuthCallbackUrl(url)) return false;
             try {
               final imported = await McCloudService.importWebSession(url);
               if (imported && webContext.mounted) Navigator.pop(webContext);

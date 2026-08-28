@@ -12,6 +12,29 @@ void main() {
         .setMockMethodCallHandler(channel, null);
   });
 
+  test('recognizes only controlled MonkeyCode OAuth callback paths', () {
+    expect(
+      isMcCloudOAuthCallbackUrl(
+        'https://monkeycode-ai.com/api/v1/users/login/callback?code=secret',
+      ),
+      isTrue,
+    );
+    expect(
+      isMcCloudOAuthCallbackUrl(
+        'https://baizhi.cloud/api/v1/users/oauth/github/callback?code=secret',
+      ),
+      isTrue,
+    );
+    expect(
+      isMcCloudOAuthCallbackUrl('https://github.com/login/oauth/authorize'),
+      isFalse,
+    );
+    expect(
+      isMcCloudOAuthCallbackUrl('https://monkeycode-ai.com/api/v1/users/login'),
+      isFalse,
+    );
+  });
+
   test('parses session and dashboard payloads into typed models', () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {

@@ -4,6 +4,15 @@ import 'package:flutter/services.dart';
 
 typedef McJson = Map<String, Object?>;
 
+bool isMcCloudOAuthCallbackUrl(String value) {
+  final path = Uri.tryParse(value)?.path;
+  if (path == null) return false;
+  return path == '/api/v1/users/login/callback' ||
+      RegExp(
+        r'^/api/v1/(users/)?oauth/[a-z0-9_-]+/callback$',
+      ).hasMatch(path);
+}
+
 class McCloudPage<T> {
   const McCloudPage(this.items, {this.nextCursor, this.hasMore = false});
 

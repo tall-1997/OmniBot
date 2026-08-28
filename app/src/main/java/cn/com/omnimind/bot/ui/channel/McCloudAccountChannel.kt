@@ -106,8 +106,15 @@ class McCloudAccountChannel : EventChannel.StreamHandler {
         }
         when (call.method) {
             "getSessionState" -> launch(result) {
-                val user = if (service.session.isSignedIn()) runCatching { service.account.status() }.getOrNull() else null
-                mapOf("signedIn" to service.session.isSignedIn(), "user" to user)
+                if (!service.session.isSignedIn()) {
+                    mapOf("signedIn" to false, "user" to null)
+                } else {
+                    try {
+                        mapOf("signedIn" to true, "user" to service.account.status())
+                    } catch (error: McCloudApiException) {
+                        if (error.statusCode == 401) mapOf("signedIn" to false, "user" to null) else throw error
+                    }
+                }
             }
             "loginWithPassword" -> launch(result) {
                 service.account.loginWithPassword(call.requiredString("email"), call.requiredString("password", false))

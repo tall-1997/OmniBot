@@ -78,6 +78,15 @@ class McCloudFoundationTest {
         }
     }
 
+    @Test
+    fun oauthCallbackPathsAcceptLoginAndProviderCallbacksOnly() {
+        assertTrue(McCloudOAuthHandler.isControlledCallbackPath("/api/v1/users/login/callback"))
+        assertTrue(McCloudOAuthHandler.isControlledCallbackPath("/api/v1/users/oauth/github/callback"))
+        assertTrue(McCloudOAuthHandler.isControlledCallbackPath("/api/v1/oauth/github/callback"))
+        assertFalse(McCloudOAuthHandler.isControlledCallbackPath("/api/v1/users/login"))
+        assertFalse(McCloudOAuthHandler.isControlledCallbackPath("/oauth/authorize"))
+    }
+
     private inline fun <reified T : Throwable> assertFails(block: () -> Unit) {
         try {
             block()

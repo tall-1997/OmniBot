@@ -75,6 +75,9 @@ class McCloudCloudRepository(
             "subscription" to asyncResult { getSubscription() },
         )
         val results = calls.map { it.second }.awaitAll()
+        results.firstNotNullOfOrNull { result ->
+            (result.exceptionOrNull() as? McCloudApiException)?.takeIf { it.statusCode == 401 }
+        }?.let { throw it }
         if (results.all { it.isFailure }) {
             throw results.firstNotNullOf { it.exceptionOrNull() }
         }

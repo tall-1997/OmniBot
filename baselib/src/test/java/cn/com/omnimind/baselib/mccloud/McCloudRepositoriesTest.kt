@@ -42,6 +42,22 @@ class McCloudRepositoriesTest {
     }
 
     @Test
+    fun dashboardPropagatesUnauthorizedFromAnyBranch() = runBlocking {
+        val remote = ScriptedRemote().apply {
+            respond("/api/v1/users/wallet", McCloudWallet(balance = 12_000))
+            fail("/api/v1/users/wallet/checkin", McCloudApiException(statusCode = 401, message = "expired"))
+            respond("/api/v1/users/invitations", McCloudInvitationPage())
+            respond("/api/v1/users/subscription", McCloudSubscription())
+        }
+
+        val error = runCatching { McCloudCloudRepository(remote, McCloudCaptchaSolver(remote)).getDashboard() }
+            .exceptionOrNull()
+
+        assertTrue(error is McCloudApiException)
+        assertEquals(401, (error as McCloudApiException).statusCode)
+    }
+
+    @Test
     fun taskOptionsRequireModelsAndImagesAndTolerateOptionalFailures() = runBlocking {
         val remote = ScriptedRemote().apply {
             respond("/api/v1/users/models", McCloudModelsResponse(listOf(McCloudModel("m", "model"))))

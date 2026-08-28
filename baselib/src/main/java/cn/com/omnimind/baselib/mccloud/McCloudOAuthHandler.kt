@@ -289,7 +289,11 @@ class McCloudOAuthHandler(
         }
     }
 
-    private fun executeBridgeHop(url: HttpUrl) = callFactory.newCall(Request.Builder().url(url).get().build()).execute()
+    private fun executeBridgeHop(url: HttpUrl) = try {
+        callFactory.newCall(Request.Builder().url(url).get().build()).execute()
+    } catch (error: IOException) {
+        throw McCloudApiException(message = "OAuth 登录网络请求失败", cause = error)
+    }
 
     private fun isAuthorizePage(url: HttpUrl): Boolean =
         isServiceUrl(url, McCloudDomain.BAIZHI) && url.encodedPath == "/oauth/authorize"
@@ -314,7 +318,7 @@ class McCloudOAuthHandler(
         McCloudDomain.values().firstOrNull { isServiceUrl(url, it) }
 
     private fun isControlledCallback(url: HttpUrl): Boolean =
-        serviceDomain(url) != null && CALLBACK_PATH_REGEX.matches(url.encodedPath)
+        serviceDomain(url) != null && isControlledCallbackPath(url.encodedPath)
 
     private fun isServiceUrl(url: HttpUrl?, domain: McCloudDomain): Boolean {
         val base = serviceUrls.getValue(domain)
@@ -347,5 +351,8 @@ class McCloudOAuthHandler(
         private val WECHAT_AUTHORIZE_HOSTS = setOf("open.weixin.qq.com", "open.wechat.com")
         private val GITHUB_AUTHORIZE_HOSTS = setOf("github.com", "www.github.com")
         private val CALLBACK_PATH_REGEX = Regex("^/api/v1/(users/)?oauth/[a-z0-9_-]+/callback$")
+
+        internal fun isControlledCallbackPath(path: String): Boolean =
+            path == "/api/v1/users/login/callback" || CALLBACK_PATH_REGEX.matches(path)
     }
 }
