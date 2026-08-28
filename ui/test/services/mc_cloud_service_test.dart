@@ -116,6 +116,26 @@ void main() {
     );
   });
 
+  test('preserves backend business error codes', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          throw PlatformException(
+            code: 'MC_CLOUD_REQUEST_FAILED',
+            message: '验证码无效',
+            details: <String, Object?>{'statusCode': 403, 'errorCode': 10601},
+          );
+        });
+
+    expect(
+      McCloudService.getDashboard(),
+      throwsA(
+        isA<McCloudFailure>()
+            .having((error) => error.statusCode, 'statusCode', 403)
+            .having((error) => error.errorCode, 'errorCode', 10601),
+      ),
+    );
+  });
+
   test('passes controlled OAuth callbacks to native methods', () async {
     final calls = <MethodCall>[];
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger

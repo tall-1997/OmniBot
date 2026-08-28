@@ -8,9 +8,7 @@ bool isMcCloudOAuthCallbackUrl(String value) {
   final path = Uri.tryParse(value)?.path;
   if (path == null) return false;
   return path == '/api/v1/users/login/callback' ||
-      RegExp(
-        r'^/api/v1/(users/)?oauth/[a-z0-9_-]+/callback$',
-      ).hasMatch(path);
+      RegExp(r'^/api/v1/(users/)?oauth/[a-z0-9_-]+/callback$').hasMatch(path);
 }
 
 class McCloudPage<T> {
@@ -22,11 +20,17 @@ class McCloudPage<T> {
 }
 
 class McCloudFailure implements Exception {
-  const McCloudFailure(this.code, this.message, {this.statusCode});
+  const McCloudFailure(
+    this.code,
+    this.message, {
+    this.statusCode,
+    this.errorCode,
+  });
 
   final String code;
   final String message;
   final int? statusCode;
+  final int? errorCode;
 
   bool get sessionExpired => code == 'MC_CLOUD_UNAUTHENTICATED';
 
@@ -743,6 +747,7 @@ McCloudFailure _failure(Object error) {
       error.code,
       _cleanMessage(error.message),
       statusCode: _nullableInt(details?['statusCode']),
+      errorCode: _nullableInt(details?['errorCode']),
     );
   }
   return const McCloudFailure(

@@ -117,20 +117,33 @@ class McCloudAccountChannel : EventChannel.StreamHandler {
                 }
             }
             "loginWithPassword" -> launch(result) {
-                service.account.loginWithPassword(call.requiredString("email"), call.requiredString("password", false))
+                completeAuthentication(
+                    service,
+                    service.account.loginWithPassword(
+                        call.requiredString("email"),
+                        call.requiredString("password", false),
+                    ),
+                )
             }
             "sendPhoneCode" -> launch(result) {
                 service.oauth.sendPhoneCode(call.requiredString("phone"), pendingPhoneToken)
                 null
             }
             "loginWithPhone" -> launch(result) {
-                service.oauth.loginPhone(call.requiredString("phone"), call.requiredString("code"))
+                completeAuthentication(
+                    service,
+                    service.oauth.loginPhone(call.requiredString("phone"), call.requiredString("code")),
+                )
             }
             "prepareAlipayAppLogin" -> launch(result) { service.oauth.prepareAlipayAppLogin() }
             "loginWithAlipayApp" -> launch(result) {
                 val login = service.oauth.loginAlipayApp(call.requiredString("code"), call.requiredString("requestId"))
                 pendingPhoneToken = login.pendingPhoneToken
-                val user = if (pendingPhoneToken == null) service.oauth.bridgeBaizhiSession() else null
+                val user = if (pendingPhoneToken == null) {
+                    completeAuthentication(service, service.oauth.bridgeBaizhiSession())
+                } else {
+                    null
+                }
                 mapOf("user" to user, "requiresPhoneBind" to (pendingPhoneToken != null))
             }
             "prepareDouyinAppLogin" -> launch(result) {
@@ -139,12 +152,23 @@ class McCloudAccountChannel : EventChannel.StreamHandler {
             "loginWithDouyinApp" -> launch(result) {
                 val login = service.oauth.loginDouyinApp(call.requiredString("code"))
                 pendingPhoneToken = login.pendingPhoneToken
-                val user = if (pendingPhoneToken == null) service.oauth.bridgeBaizhiSession() else null
+                val user = if (pendingPhoneToken == null) {
+                    completeAuthentication(service, service.oauth.bridgeBaizhiSession())
+                } else {
+                    null
+                }
                 mapOf("user" to user, "requiresPhoneBind" to (pendingPhoneToken != null))
             }
             "completePhoneBind" -> launch(result) {
                 val token = pendingPhoneToken ?: throw IllegalStateException("没有待完成的手机号绑定")
-                val user = service.oauth.completePhoneBindAndBridge(token, call.requiredString("phone"), call.requiredString("code"))
+                val user = completeAuthentication(
+                    service,
+                    service.oauth.completePhoneBindAndBridge(
+                        token,
+                        call.requiredString("phone"),
+                        call.requiredString("code"),
+                    ),
+                )
                 pendingPhoneToken = null
                 user
             }
@@ -153,14 +177,14 @@ class McCloudAccountChannel : EventChannel.StreamHandler {
                 mapOf("url" to service.oauth.getBaizhiOAuthLoginUrl("github", call.requiredString("redirectUrl")))
             }
             "completeOAuthCallback" -> launch(result) {
-                service.oauth.completeControlledCallback(call.requiredString("url"))
+                completeAuthentication(service, service.oauth.completeControlledCallback(call.requiredString("url")))
             }
             "completeGithubLogin" -> launch(result) {
-                service.oauth.completeControlledCallback(call.requiredString("callbackUrl"))
+                completeAuthentication(service, service.oauth.completeControlledCallback(call.requiredString("callbackUrl")))
                 mapOf("completed" to true)
             }
             "importWebSession" -> launch(result) {
-                service.oauth.completeControlledCallback(call.requiredString("url"))
+                completeAuthentication(service, service.oauth.completeControlledCallback(call.requiredString("url")))
                 mapOf("imported" to true)
             }
             "importSessionCookie" -> launch(result) {
@@ -169,7 +193,7 @@ class McCloudAccountChannel : EventChannel.StreamHandler {
                     else -> throw IllegalArgumentException("domain is invalid")
                 }
                 service.oauth.importControlledSessionCookie(domain, call.requiredString("cookie", false))
-                service.account.status()
+                completeAuthentication(service, service.account.status())
             }
             "getThirdPartyLoginCapabilities" -> launch(result) {
                 mapOf(
@@ -278,7 +302,10 @@ class McCloudAccountChannel : EventChannel.StreamHandler {
                     val state = withContext(Dispatchers.IO) { McCloud.get().oauth.pollWechatLogin() }
                     McCloudEvents.emit(mapOf("type" to "wechatLoginState", "state" to state.name.lowercase()))
                     if (state == McCloudWechatState.COMPLETED) {
-                        val user = withContext(Dispatchers.IO) { McCloud.get().account.status() }
+                        val user = withContext(Dispatchers.IO) {
+                            val service = McCloud.get()
+                            completeAuthentication(service, service.account.status())
+                        }
                         McCloudEvents.emit(mapOf("type" to "wechatLoginCompleted", "user" to user.toSafePayload()))
                         break
                     }
@@ -317,6 +344,25 @@ class McCloudAccountChannel : EventChannel.StreamHandler {
         ModelProviderConfigStore.cloudProfileIds().forEach { profileId ->
             MonkeyCodeCloudCredentialLifecycle.ensure(profileId, service.cloud)
         }
+    }
+
+    private suspend fun completeAuthentication(
+        service: cn.com.omnimind.baselib.mccloud.McCloudServices,
+        user: cn.com.omnimind.baselib.mccloud.McCloudUser,
+    ): cn.com.omnimind.baselib.mccloud.McCloudUser {
+        try {
+            val models = service.models.list()
+            syncCloudProfiles(service, models)
+            ensureCloudCredentials(service)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: McCloudApiException) {
+            if (error.statusCode == 401) throw error
+            OmniLog.w(TAG, "McCloud post-login model sync failed: ${error.javaClass.simpleName}")
+        } catch (error: Exception) {
+            OmniLog.w(TAG, "McCloud post-login model sync failed: ${error.javaClass.simpleName}")
+        }
+        return user
     }
 
     private suspend fun revokeCloudCredentials(service: cn.com.omnimind.baselib.mccloud.McCloudServices) {
@@ -371,7 +417,10 @@ class McCloudAccountChannel : EventChannel.StreamHandler {
         is McCloudApiException -> Triple(
             if (error.statusCode == 401) "MC_CLOUD_UNAUTHENTICATED" else "MC_CLOUD_REQUEST_FAILED",
             McCloudPayloadSanitizer.sanitizeMessage(error.message ?: "MonkeyCode 云请求失败"),
-            error.statusCode?.let { mapOf("statusCode" to it) },
+            buildMap {
+                error.statusCode?.let { put("statusCode", it) }
+                error.errorCode?.let { put("errorCode", it) }
+            }.takeIf { it.isNotEmpty() },
         )
         is IllegalStateException -> Triple("MC_CLOUD_STATE_ERROR", error.message ?: "云服务状态异常", null)
         else -> Triple("MC_CLOUD_OPERATION_FAILED", "MonkeyCode 云操作失败", null)

@@ -89,28 +89,32 @@ class _AccountPageState extends State<AccountPage>
     });
     try {
       final session = await McCloudService.getSessionState();
-      final results = await Future.wait<Object?>([
-        if (session.signedIn)
-          McCloudService.getDashboard()
-        else
-          Future.value(null),
-        if (session.signedIn)
-          McCloudService.listInvitations()
-        else
-          Future.value(const <McCloudInvitation>[]),
-        if (!session.signedIn)
-          _loadThirdPartyCapabilities()
-        else
-          Future.value(null),
-      ]);
+      McCloudDashboard? dashboard;
+      List<McCloudInvitation> invitations = const [];
+      McJson? capabilities;
+      Object? secondaryError;
+      if (session.signedIn) {
+        try {
+          dashboard = await McCloudService.getDashboard();
+        } catch (error) {
+          secondaryError = error;
+        }
+        try {
+          invitations = await McCloudService.listInvitations();
+        } catch (error) {
+          secondaryError ??= error;
+        }
+      } else {
+        capabilities = await _loadThirdPartyCapabilities();
+      }
       if (mounted && generation == _loadGeneration)
         setState(() {
           _session = session;
-          _dashboard = results[0] as McCloudDashboard?;
-          _invitations = results[1] as List<McCloudInvitation>;
-          final capabilities = results[2] as McJson?;
+          _dashboard = dashboard;
+          _invitations = invitations;
           if (capabilities != null)
             _thirdPartyUnavailable = _capabilityReasons(capabilities);
+          if (secondaryError != null) _error = _message(secondaryError);
         });
     } catch (error) {
       if (mounted && generation == _loadGeneration) {
@@ -555,46 +559,95 @@ class _AccountPageState extends State<AccountPage>
   Future<void> _showPhoneBind() async {
     final phone = TextEditingController();
     final code = TextEditingController();
+    var sending = false;
+    String? sendError;
     try {
       final fields = await showDialog<List<String>>(
         context: context,
         barrierDismissible: false,
-        builder: (dialogContext) => AlertDialog(
-          title: Text(_t('绑定手机号', 'Bind phone number')),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: phone,
-                keyboardType: TextInputType.phone,
-                decoration: InputDecoration(
-                  labelText: _t('手机号', 'Phone number'),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: code,
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                  labelText: _t('验证码', 'Code'),
-                  suffixIcon: TextButton(
-                    onPressed: () =>
-                        McCloudService.sendPhoneCode(phone.text.trim()),
-                    child: Text(_t('发送', 'Send')),
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: Text(_t('绑定手机号', 'Bind phone number')),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: phone,
+                  keyboardType: TextInputType.phone,
+                  decoration: InputDecoration(
+                    labelText: _t('手机号', 'Phone number'),
                   ),
                 ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: code,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: _t('验证码', 'Code'),
+                    suffixIcon: TextButton(
+                      onPressed: sending
+                          ? null
+                          : () async {
+                              final value = phone.text.trim();
+                              if (value.length < 11) {
+                                setDialogState(() {
+                                  sendError = _t(
+                                    '请填写正确手机号',
+                                    'Enter a valid phone number',
+                                  );
+                                });
+                                return;
+                              }
+                              setDialogState(() {
+                                sending = true;
+                                sendError = null;
+                              });
+                              try {
+                                await McCloudService.sendPhoneCode(value);
+                              } catch (error) {
+                                if (dialogContext.mounted) {
+                                  setDialogState(
+                                    () => sendError = _message(error),
+                                  );
+                                }
+                              } finally {
+                                if (dialogContext.mounted) {
+                                  setDialogState(() => sending = false);
+                                }
+                              }
+                            },
+                      child: sending
+                          ? const SizedBox.square(
+                              dimension: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Text(_t('发送', 'Send')),
+                    ),
+                  ),
+                ),
+                if (sendError != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    sendError!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            actions: [
+              FilledButton(
+                onPressed: sending
+                    ? null
+                    : () => Navigator.pop(dialogContext, [
+                        phone.text.trim(),
+                        code.text.trim(),
+                      ]),
+                child: Text(_t('完成绑定', 'Complete binding')),
               ),
             ],
           ),
-          actions: [
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, [
-                phone.text.trim(),
-                code.text.trim(),
-              ]),
-              child: Text(_t('完成绑定', 'Complete binding')),
-            ),
-          ],
         ),
       );
       if (fields == null || fields[0].length < 11 || fields[1].isEmpty)
