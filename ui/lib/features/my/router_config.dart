@@ -6,6 +6,8 @@ import 'package:ui/features/my/pages/about/about_page.dart';
 import 'package:ui/features/my/pages/about/ai_request_logs_page.dart';
 import 'package:ui/features/my/pages/about/runtime_logs_page.dart';
 import 'package:ui/features/my/pages/account/account_page.dart';
+import 'package:ui/features/my/pages/account/mc_cloud_management_pages.dart';
+import 'package:ui/services/mc_cloud_service.dart';
 
 /// My模块路由配置
 List<GoRoute> myRoutes = [
@@ -30,6 +32,48 @@ List<GoRoute> myRoutes = [
       key: state.pageKey,
       name: 'my/account',
       child: const AccountPage(),
+    ),
+  ),
+
+  GoRoute(
+    path: '/my/account/git-identities',
+    name: 'my/account/git-identities',
+    pageBuilder: (context, state) => GoRouterManager.buildActivitySlidePage(
+      key: state.pageKey,
+      name: 'my/account/git-identities',
+      child: const McCloudGitIdentitiesPage(),
+    ),
+  ),
+  GoRoute(
+    path: '/my/account/cloud-models',
+    name: 'my/account/cloud-models',
+    pageBuilder: (context, state) => GoRouterManager.buildActivitySlidePage(
+      key: state.pageKey,
+      name: 'my/account/cloud-models',
+      child: const McCloudModelsPage(),
+    ),
+  ),
+  GoRoute(
+    path: '/my/account/cloud-projects',
+    name: 'my/account/cloud-projects',
+    pageBuilder: (context, state) => GoRouterManager.buildActivitySlidePage(
+      key: state.pageKey,
+      name: 'my/account/cloud-projects',
+      child: const McCloudProjectsPage(),
+    ),
+  ),
+  GoRoute(
+    path: '/my/account/cloud-tasks/:taskId',
+    name: 'my/account/cloud-task',
+    pageBuilder: (context, state) => GoRouterManager.buildActivitySlidePage(
+      key: state.pageKey,
+      name: 'my/account/cloud-task',
+      child: McCloudTaskDetailPage(
+        taskId: state.pathParameters['taskId']!,
+        initialTask: state.extra is McCloudTask
+            ? state.extra as McCloudTask
+            : null,
+      ),
     ),
   ),
 

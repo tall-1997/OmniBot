@@ -10,7 +10,9 @@ import com.google.gson.reflect.TypeToken
 
 internal data class ModelProviderSecrets(
     val apiKey: String = "",
-    val customHeaders: Map<String, String> = emptyMap()
+    val customHeaders: Map<String, String> = emptyMap(),
+    val cloudKeyId: String = "",
+    val cloudSigningSecret: String = "",
 )
 
 internal interface ModelProviderSecretStore {
@@ -68,12 +70,23 @@ internal class EncryptedModelProviderSecretStore(context: Context) : ModelProvid
         val encodedId = encodeKeyPart(profileId)
         val apiKeyStorageKey = "$PROFILE_API_KEY_PREFIX$encodedId"
         val headersStorageKey = "$PROFILE_HEADERS_PREFIX$encodedId"
-        if (!preferences.contains(apiKeyStorageKey) && !preferences.contains(headersStorageKey)) {
+        val cloudKeyIdStorageKey = "$PROFILE_CLOUD_KEY_ID_PREFIX$encodedId"
+        val cloudSigningSecretStorageKey = "$PROFILE_CLOUD_SIGNING_SECRET_PREFIX$encodedId"
+        if (!preferences.contains(apiKeyStorageKey) &&
+            !preferences.contains(headersStorageKey) &&
+            !preferences.contains(cloudKeyIdStorageKey) &&
+            !preferences.contains(cloudSigningSecretStorageKey)
+        ) {
             return null
         }
         val apiKey = preferences.getString(apiKeyStorageKey, null)?.trim().orEmpty()
         val headers = decodeHeaders(preferences.getString(headersStorageKey, null))
-        return ModelProviderSecrets(apiKey = apiKey, customHeaders = headers)
+        return ModelProviderSecrets(
+            apiKey = apiKey,
+            customHeaders = headers,
+            cloudKeyId = preferences.getString(cloudKeyIdStorageKey, null)?.trim().orEmpty(),
+            cloudSigningSecret = preferences.getString(cloudSigningSecretStorageKey, null)?.trim().orEmpty(),
+        )
     }
 
     @Synchronized
@@ -81,6 +94,8 @@ internal class EncryptedModelProviderSecretStore(context: Context) : ModelProvid
         val encodedId = encodeKeyPart(profileId)
         val apiKeyStorageKey = "$PROFILE_API_KEY_PREFIX$encodedId"
         val headersStorageKey = "$PROFILE_HEADERS_PREFIX$encodedId"
+        val cloudKeyIdStorageKey = "$PROFILE_CLOUD_KEY_ID_PREFIX$encodedId"
+        val cloudSigningSecretStorageKey = "$PROFILE_CLOUD_SIGNING_SECRET_PREFIX$encodedId"
         val apiKey = secrets.apiKey.trim()
         val headers = ProviderCustomHeaderUtils.sanitizeCustomHeaders(secrets.customHeaders)
         val editor = preferences.edit()
@@ -94,9 +109,26 @@ internal class EncryptedModelProviderSecretStore(context: Context) : ModelProvid
         } else {
             editor.putString(headersStorageKey, gson.toJson(headers))
         }
+        if (secrets.cloudKeyId.isBlank()) {
+            editor.remove(cloudKeyIdStorageKey)
+        } else {
+            editor.putString(cloudKeyIdStorageKey, secrets.cloudKeyId.trim())
+        }
+        if (secrets.cloudSigningSecret.isBlank()) {
+            editor.remove(cloudSigningSecretStorageKey)
+        } else {
+            editor.putString(cloudSigningSecretStorageKey, secrets.cloudSigningSecret.trim())
+        }
         check(editor.commit()) { "failed to store encrypted model-provider credentials" }
-        val expected = ModelProviderSecrets(apiKey, headers)
-            .takeUnless { it.apiKey.isEmpty() && it.customHeaders.isEmpty() }
+        val expected = ModelProviderSecrets(
+            apiKey = apiKey,
+            customHeaders = headers,
+            cloudKeyId = secrets.cloudKeyId.trim(),
+            cloudSigningSecret = secrets.cloudSigningSecret.trim(),
+        ).takeUnless {
+            it.apiKey.isEmpty() && it.customHeaders.isEmpty() &&
+                it.cloudKeyId.isEmpty() && it.cloudSigningSecret.isEmpty()
+        }
         check(readProfile(profileId) == expected) {
             "failed to verify encrypted model-provider credentials"
         }
@@ -109,6 +141,8 @@ internal class EncryptedModelProviderSecretStore(context: Context) : ModelProvid
             preferences.edit()
                 .remove("$PROFILE_API_KEY_PREFIX$encodedId")
                 .remove("$PROFILE_HEADERS_PREFIX$encodedId")
+                .remove("$PROFILE_CLOUD_KEY_ID_PREFIX$encodedId")
+                .remove("$PROFILE_CLOUD_SIGNING_SECRET_PREFIX$encodedId")
                 .commit()
         ) { "failed to delete encrypted model-provider credentials" }
         check(readProfile(profileId) == null) {
@@ -125,6 +159,10 @@ internal class EncryptedModelProviderSecretStore(context: Context) : ModelProvid
                     key.removePrefix(PROFILE_API_KEY_PREFIX) !in retainedIds
                 key.startsWith(PROFILE_HEADERS_PREFIX) ->
                     key.removePrefix(PROFILE_HEADERS_PREFIX) !in retainedIds
+                key.startsWith(PROFILE_CLOUD_KEY_ID_PREFIX) ->
+                    key.removePrefix(PROFILE_CLOUD_KEY_ID_PREFIX) !in retainedIds
+                key.startsWith(PROFILE_CLOUD_SIGNING_SECRET_PREFIX) ->
+                    key.removePrefix(PROFILE_CLOUD_SIGNING_SECRET_PREFIX) !in retainedIds
                 else -> false
             }
         }
@@ -198,6 +236,8 @@ internal class EncryptedModelProviderSecretStore(context: Context) : ModelProvid
 
         private const val PROFILE_API_KEY_PREFIX = "profile_api_key_"
         private const val PROFILE_HEADERS_PREFIX = "profile_headers_"
+        private const val PROFILE_CLOUD_KEY_ID_PREFIX = "profile_cloud_key_id_"
+        private const val PROFILE_CLOUD_SIGNING_SECRET_PREFIX = "profile_cloud_signing_secret_"
         private const val LEGACY_API_KEY_PREFIX = "legacy_api_key_"
     }
 }

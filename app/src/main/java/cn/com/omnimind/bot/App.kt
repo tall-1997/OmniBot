@@ -1,11 +1,10 @@
 package cn.com.omnimind.bot
 
 import BaseApplication
-import cn.com.omnimind.baselib.account.OmniAccount
 import cn.com.omnimind.baselib.database.DatabaseHelper
 import cn.com.omnimind.baselib.i18n.AppLocaleManager
 import cn.com.omnimind.baselib.llm.ModelProviderConfigStore
-import cn.com.omnimind.baselib.llm.PlatformAiProvisioner
+import cn.com.omnimind.baselib.mccloud.McCloud
 import cn.com.omnimind.baselib.util.AppSecretStore
 import cn.com.omnimind.baselib.util.CredentialEndpointSecurity
 import cn.com.omnimind.baselib.util.OmniLog
@@ -87,17 +86,9 @@ class App : BaseApplication() {
         CredentialEndpointSecurity.configureDebugLoopback(BuildConfig.DEBUG)
         AppSecretStore.initialize(this)
         ModelProviderConfigStore.initialize(this)
+        McCloud.initialize(this, allowInsecureLoopback = BuildConfig.DEBUG)
         DebugOmniMindProviderBootstrap.install(this)
         OfficialOmniPluginProviders.register()
-        OmniAccount.initialize(
-            context = this,
-            baseUrl = BuildConfig.BASE_URL,
-            platformGatewayUrl = BuildConfig.AI_GATEWAY_URL,
-            allowInsecureLoopback = BuildConfig.DEBUG,
-            cloudServiceAccessProvider = {
-                AppUpdateManager.getCloudServiceAccessState(this)
-            },
-        )
         AgentPromptSettingsStore.initializeAndCleanupLegacyFiles(this)
         LegacyLocalModelDataCleanup.start(this)
         setupUncaughtExceptionHandler()
@@ -213,16 +204,6 @@ class App : BaseApplication() {
                 AppUpdateManager.checkNow(this@App, force = true)
             }.onFailure {
                 OmniLog.w("AppStartup", "Cloud-service version policy check failed: ${it.message}")
-            }
-            if (
-                OmniAccount.isConfigured() &&
-                OmniAccount.repository().isSignedIn() &&
-                OmniAccount.currentCloudServiceAccess().allowed
-            ) {
-                runCatching {
-                    val settings = OmniAccount.repository().getAiSettings()
-                    PlatformAiProvisioner.synchronize(settings)
-                }
             }
         }
         OmniLog.d("AppStartup", "initSDKsAfterPrivacyConsent completed")

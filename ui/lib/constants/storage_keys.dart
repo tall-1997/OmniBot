@@ -7,7 +7,7 @@ class StorageKeys {
 
   /// 启动时未登录账号提示是否已选择不再提醒
   static const String startupAccountPromptDismissed =
-      'startup_account_prompt_dismissed';
+      'startup_account_prompt_dismissed_v2';
 
   /// 自启动权限是否已手动确认完成
   static const String autoStartPermissionGranted =

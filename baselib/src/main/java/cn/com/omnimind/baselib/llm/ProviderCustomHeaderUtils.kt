@@ -15,7 +15,8 @@ object ProviderCustomHeaderUtils {
         "api-key",
         "cookie",
         "set-cookie",
-        "proxy-authorization"
+        "proxy-authorization",
+        "x-ohmyagent-signature",
     )
 
     fun normalizeHeaderName(name: String): String {

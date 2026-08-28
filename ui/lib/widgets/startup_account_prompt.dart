@@ -7,6 +7,7 @@ import 'package:ui/core/router/go_router_manager.dart';
 import 'package:ui/features/my/pages/account/account_page.dart';
 import 'package:ui/services/account_service.dart';
 import 'package:ui/services/app_update_service.dart';
+import 'package:ui/services/mc_cloud_service.dart';
 import 'package:ui/services/storage_service.dart';
 import 'package:ui/theme/theme_context.dart';
 
@@ -99,13 +100,18 @@ class _StartupAccountPromptState extends State<StartupAccountPrompt> {
             await AppUpdateService.refreshIfNeeded();
           };
       await refreshVersionPolicy();
-      final session =
-          await (widget.loadSession ?? AccountService.getSessionState)();
+      final legacySession = widget.loadSession == null
+          ? null
+          : await widget.loadSession!();
+      final signedIn =
+          legacySession?.signedIn ??
+          (await McCloudService.getSessionState()).signedIn;
       if (!mounted ||
-          !session.configured ||
-          session.signedIn ||
-          !session.cloudServicePolicyKnown ||
-          !session.cloudServiceAccessAllowed) {
+          signedIn ||
+          (legacySession != null &&
+              (!legacySession.configured ||
+                  !legacySession.cloudServicePolicyKnown ||
+                  !legacySession.cloudServiceAccessAllowed))) {
         return;
       }
       final navigator =
@@ -271,7 +277,7 @@ class _StartupAccountSlogan extends StatelessWidget {
     final slogan = Semantics(
       header: true,
       child: Text(
-        '小万通灵，云启大千',
+        '连接 MonkeyCode 云，协作随行',
         key: const ValueKey('startup-account-slogan'),
         maxLines: 1,
         overflow: TextOverflow.fade,

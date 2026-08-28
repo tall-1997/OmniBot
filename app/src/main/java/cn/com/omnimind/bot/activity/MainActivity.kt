@@ -151,6 +151,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onDestroy() {
         TaskRuntimeSettings.detachActivity(this)
+        channelManager.clearChannel()
         super.onDestroy()
     }
 

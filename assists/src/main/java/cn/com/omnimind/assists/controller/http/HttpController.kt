@@ -1,9 +1,6 @@
 package cn.com.omnimind.assists.controller.http
 
 import cn.com.omnimind.assists.api.bean.ResultBean
-import cn.com.omnimind.baselib.account.AiRequestTransportPolicy
-import cn.com.omnimind.baselib.account.AiTransportRoute
-import cn.com.omnimind.baselib.account.OmniAccount
 import cn.com.omnimind.baselib.llm.AssistantToolCall
 import cn.com.omnimind.baselib.llm.AssistantToolCallFunction
 import cn.com.omnimind.baselib.llm.AiRequestLogEntry
@@ -17,13 +14,15 @@ import cn.com.omnimind.baselib.database.DatabaseHelper
 import cn.com.omnimind.baselib.database.TokenUsageRecord
 import cn.com.omnimind.baselib.llm.ModelProviderConfig
 import cn.com.omnimind.baselib.llm.ModelProviderConfigStore
+import cn.com.omnimind.baselib.llm.MonkeyCodeCloudCredential
+import cn.com.omnimind.baselib.llm.MonkeyCodeCloudProvider
+import cn.com.omnimind.baselib.llm.MonkeyCodeCloudCredentialLifecycle
+import cn.com.omnimind.baselib.mccloud.McCloud
 import cn.com.omnimind.baselib.util.OmniLog
 import cn.com.omnimind.baselib.llm.ModelSceneRegistry
 import cn.com.omnimind.baselib.llm.OpenAiWireApi
 import cn.com.omnimind.baselib.llm.OpenAIResponsesRequest
 import cn.com.omnimind.baselib.llm.OpenAiResponsesFunctionNameCodec
-import cn.com.omnimind.baselib.llm.OmniOfficialProvider
-import cn.com.omnimind.baselib.llm.PlatformAiProvisioner
 import cn.com.omnimind.baselib.llm.ProviderModelOption
 import cn.com.omnimind.baselib.llm.ProviderCustomHeaderUtils
 import cn.com.omnimind.baselib.llm.SceneModelBindingStore
@@ -44,7 +43,9 @@ import kotlinx.serialization.json.put
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
@@ -53,8 +54,10 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.sse.EventSource
 import okhttp3.sse.EventSourceListener
 import okhttp3.sse.EventSources
+import okio.Buffer
 import org.json.JSONObject
 import org.json.JSONArray
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /**
  * AI HTTP 控制器，用于处理模型网络请求
@@ -101,7 +104,8 @@ object HttpController {
         val overrideApplied: Boolean,
         val overrideModel: String?,
         val protocolType: String = "openai_compatible",
-        val wireApi: String = OpenAiWireApi.CHAT_COMPLETIONS
+        val wireApi: String = OpenAiWireApi.CHAT_COMPLETIONS,
+        val cloudCredential: MonkeyCodeCloudCredential? = null,
     )
 
     private data class AiRequestLogSeed(
@@ -238,6 +242,7 @@ object HttpController {
 
     private val sceneCompletionClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
+            .addInterceptor(cloudCredentialRenewalInterceptor)
             .connectTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
             // Model completion may legitimately spend longer than three
             // minutes before the response is complete.  Cancellation is
@@ -246,6 +251,36 @@ object HttpController {
             .readTimeout(0, java.util.concurrent.TimeUnit.SECONDS)
             .writeTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
             .build()
+    }
+
+    private val cloudCredentialRenewalInterceptor = Interceptor { chain ->
+        val request = chain.request()
+        val response = chain.proceed(request)
+        if (!shouldRenewMonkeyCodeCloudCredential(response.code, request.headers.toMap())) {
+            return@Interceptor response
+        }
+
+        val apiKey = request.header("X-Api-Key").orEmpty()
+        val profileId = ModelProviderConfigStore.cloudProfileIds().firstOrNull { id ->
+            ModelProviderConfigStore.readMonkeyCodeCloudCredential(id)?.apiKey == apiKey
+        } ?: return@Interceptor response
+        val requestJson = request.body?.let { body ->
+            Buffer().use { buffer ->
+                body.writeTo(buffer)
+                buffer.readUtf8()
+            }
+        } ?: return@Interceptor response
+        response.close()
+        val credential = runBlocking {
+            MonkeyCodeCloudCredentialLifecycle.renew(profileId, McCloud.get().cloud)
+        }
+        chain.proceed(
+            request.newBuilder().apply {
+                MonkeyCodeCloudProvider.requestHeaders(credential, requestJson).forEach { (name, value) ->
+                    header(name, value)
+                }
+            }.build()
+        )
     }
 
     private val completionJson = Json {
@@ -434,7 +469,7 @@ object HttpController {
                     label = seed.label,
                     model = seed.model,
                     protocolType = seed.protocolType,
-                    url = seed.url,
+                    url = redactUrlForLog(seed.url),
                     method = seed.method,
                     stream = seed.stream,
                     statusCode = statusCode,
@@ -525,7 +560,7 @@ object HttpController {
                 "prompt=$promptTokens, completion=$completionTokens, " +
                 "reasoning=$reasoningTokens, text=$textTokens, cached=$cachedTokens, " +
                 "cacheCreation=$cacheCreationTokens, " +
-                "stream=${seed.stream}, url=${seed.url}"
+                "stream=${seed.stream}, url=${redactUrlForLog(seed.url)}"
         )
 
         CoroutineScope(Dispatchers.IO).launch {
@@ -889,11 +924,7 @@ object HttpController {
             null
         }
         fun resolveBindingProfile(binding: cn.com.omnimind.baselib.llm.SceneModelBindingEntry?) =
-            binding?.providerProfileId?.let { profileId ->
-            ModelProviderConfigStore.getProfile(profileId)
-                ?: PlatformAiProvisioner.officialProfileOrNull()
-                    ?.takeIf { OmniOfficialProvider.isOfficialProfile(profileId) }
-            }
+            binding?.providerProfileId?.let(ModelProviderConfigStore::getProfile)
         val directBoundProfile = resolveBindingProfile(directSceneBinding)
         val sharedAgentBoundProfile = resolveBindingProfile(sharedAgentBinding)
         val sharedAgentModel = sharedAgentBinding
@@ -970,6 +1001,33 @@ object HttpController {
             )
             else -> emptyMap()
         }
+        val selectedProfile = when {
+            bindingApplied -> boundProfile
+            explicitBase == null && providerBase != null -> ModelProviderConfigStore.getEditingProfile()
+            else -> null
+        }
+        if (selectedProfile != null &&
+            MonkeyCodeCloudProvider.isCloudSource(selectedProfile.sourceType) &&
+            !selectedProfile.ready
+        ) {
+            throw IllegalStateException(selectedProfile.statusText ?: "MonkeyCode cloud model is unavailable")
+        }
+        val cloudCredential = selectedProfile
+            ?.takeIf { profile ->
+                MonkeyCodeCloudProvider.shouldAttachCredential(profile, providerBase.orEmpty())
+            }
+            ?.let { profile ->
+                ModelProviderConfigStore.readMonkeyCodeCloudCredential(profile.id)
+                    ?: kotlinx.coroutines.runBlocking {
+                        MonkeyCodeCloudCredentialLifecycle.ensure(profile.id, McCloud.get().cloud)
+                    }
+            }
+        if (selectedProfile != null &&
+            MonkeyCodeCloudProvider.isCloudSource(selectedProfile.sourceType) &&
+            cloudCredential == null
+        ) {
+            throw IllegalStateException("MonkeyCode cloud model credential is unavailable")
+        }
         val protocolType = when {
             explicitProtocol != null -> explicitProtocol
             explicitBase != null -> DeepSeekProvider.normalizeProtocolType(null)
@@ -987,37 +1045,13 @@ object HttpController {
             ModelSceneRegistry.SceneTransport.OPENAI_COMPATIBLE,
             ModelSceneRegistry.SceneTransport.CONVERSATION_CHAT -> ModelSceneRegistry.ResponseParser.TEXT_CONTENT
         }
-        val aiAccess = OmniAccount.currentAiRequestAccess()
-        val explicitOfficialProvider =
-            explicitBase != null &&
-                explicitKey == null &&
-                explicitHeaders.isEmpty() &&
-                aiAccess.platformGatewayUrl?.let(::normalizeApiBase) == explicitBase
-        val officialProviderSelected =
-            (bindingApplied && OmniOfficialProvider.isOfficialProfile(boundProfile?.id)) ||
-                explicitOfficialProvider
         val routeTag = when {
-            officialProviderSelected -> AiRequestTransportPolicy.PLATFORM_ROUTE_TAG
+            cloudCredential != null -> MonkeyCodeCloudProvider.ROUTE_TAG
             overrideApplied -> ROUTE_CUSTOM_OPENAI_COMPAT
             effectiveTransport == ModelSceneRegistry.SceneTransport.OPENAI_COMPATIBLE -> "openai_compatible"
             effectiveTransport == ModelSceneRegistry.SceneTransport.CONVERSATION_CHAT -> "conversation_chat"
             else -> null
         }
-
-        if (officialProviderSelected) {
-            aiAccess.unavailableReason?.let { throw IllegalStateException(it) }
-        }
-        val transportRoute = AiRequestTransportPolicy.apply(
-            access = aiAccess,
-            byokRoute = AiTransportRoute(
-                apiBase = providerBase,
-                apiKey = providerKey,
-                customHeaders = providerHeaders,
-                protocolType = protocolType,
-                wireApi = wireApi,
-                routeTag = routeTag,
-            ),
-        )
 
         return ResolvedSceneRequest(
             requestedModel = requestedModel,
@@ -1029,9 +1063,9 @@ object HttpController {
             sceneProfile = sceneProfile,
             effectiveTransport = effectiveTransport,
             responseParser = responseParser,
-            apiBase = transportRoute.apiBase,
-            apiKey = transportRoute.apiKey,
-            customHeaders = transportRoute.customHeaders,
+            apiBase = providerBase,
+            apiKey = providerKey,
+            customHeaders = providerHeaders,
             providerProfileId = when {
                 bindingApplied -> boundProfile?.id
                 else -> null
@@ -1040,14 +1074,15 @@ object HttpController {
                 bindingApplied -> boundProfile?.name
                 else -> null
             },
-            routeTag = transportRoute.routeTag,
-            customApiBaseApplied = !transportRoute.apiBase.isNullOrBlank(),
+            routeTag = routeTag,
+            customApiBaseApplied = !providerBase.isNullOrBlank(),
             bindingApplied = bindingApplied,
             bindingProfileMissing = bindingProfileMissing,
             overrideApplied = overrideApplied,
             overrideModel = overrideModel,
-            protocolType = transportRoute.protocolType,
-            wireApi = transportRoute.wireApi
+            protocolType = protocolType,
+            wireApi = wireApi,
+            cloudCredential = cloudCredential,
         )
     }
 
@@ -1115,7 +1150,9 @@ object HttpController {
         url: String,
         requestBody: okhttp3.RequestBody? = null,
         apiKey: String? = null,
-        customHeaders: Map<String, String> = emptyMap()
+        customHeaders: Map<String, String> = emptyMap(),
+        cloudCredential: MonkeyCodeCloudCredential? = null,
+        requestJson: String? = null,
     ): Request.Builder {
         val headers = linkedMapOf<String, String>(
             "Content-Type" to "application/json"
@@ -1124,9 +1161,10 @@ object HttpController {
                 put("Authorization", "Bearer ${apiKey.trim()}")
             }
         }
+        val mergedHeaders = ProviderCustomHeaderUtils.mergeHeaders(headers, customHeaders)
         return buildJsonRequestBuilder(
             url = url,
-            headers = ProviderCustomHeaderUtils.mergeHeaders(headers, customHeaders),
+            headers = applyMonkeyCodeCloudHeaders(mergedHeaders, cloudCredential, requestJson),
             requestBody = requestBody
         )
     }
@@ -1170,7 +1208,9 @@ object HttpController {
         requestBody: okhttp3.RequestBody? = null,
         apiKey: String?,
         hasCacheControl: Boolean = false,
-        customHeaders: Map<String, String> = emptyMap()
+        customHeaders: Map<String, String> = emptyMap(),
+        cloudCredential: MonkeyCodeCloudCredential? = null,
+        requestJson: String? = null,
     ): Request.Builder {
         val headers = linkedMapOf(
             "Content-Type" to "application/json",
@@ -1183,11 +1223,46 @@ object HttpController {
         if (hasCacheControl) {
             headers["anthropic-beta"] = "prompt-caching-2024-07-31"
         }
+        val mergedHeaders = ProviderCustomHeaderUtils.mergeHeaders(headers, customHeaders)
         return buildJsonRequestBuilder(
             url = url,
-            headers = ProviderCustomHeaderUtils.mergeHeaders(headers, customHeaders),
+            headers = applyMonkeyCodeCloudHeaders(mergedHeaders, cloudCredential, requestJson),
             requestBody = requestBody
         )
+    }
+
+    internal fun applyMonkeyCodeCloudHeaders(
+        headers: Map<String, String>,
+        credential: MonkeyCodeCloudCredential?,
+        requestJson: String?,
+    ): Map<String, String> {
+        if (credential == null) return headers
+        val body = requireNotNull(requestJson) { "MonkeyCode cloud request body is missing" }
+        return ProviderCustomHeaderUtils.mergeHeaders(
+            headers,
+            MonkeyCodeCloudProvider.requestHeaders(credential, body),
+        )
+    }
+
+    internal fun shouldRenewMonkeyCodeCloudCredential(
+        responseCode: Int,
+        headers: Map<String, String>,
+    ): Boolean {
+        return responseCode in setOf(401, 403) &&
+            headers.keys.any { it.equals(MonkeyCodeCloudProvider.SIGNATURE_HEADER, ignoreCase = true) }
+    }
+
+    internal fun redactUrlForLog(url: String): String {
+        val parsed = url.toHttpUrlOrNull() ?: return url
+        val sensitiveNames = setOf("api_key", "apikey", "access_token", "token", "key")
+        if (parsed.queryParameterNames.none { it.lowercase() in sensitiveNames }) return url
+        return parsed.newBuilder().query(null).apply {
+            parsed.queryParameterNames.forEach { name ->
+                parsed.queryParameterValues(name).forEach { value ->
+                    addQueryParameter(name, if (name.lowercase() in sensitiveNames) "[REDACTED]" else value)
+                }
+            }
+        }.build().toString()
     }
 
     private fun logRequestHeaders(label: String, headers: Map<String, String>) {
@@ -2506,7 +2581,9 @@ object HttpController {
             requestBody = requestBody,
             apiKey = resolved.apiKey,
             hasCacheControl = hasCacheControl(requestJson),
-            customHeaders = resolved.customHeaders
+            customHeaders = resolved.customHeaders,
+            cloudCredential = resolved.cloudCredential,
+            requestJson = requestJson,
         )
             .addHeader("Accept", "text/event-stream")
             .build()
@@ -2535,6 +2612,7 @@ object HttpController {
 
     private fun openAIStreamClient(forceHttp1: Boolean = false): OkHttpClient {
         return OkHttpClient.Builder()
+            .addInterceptor(cloudCredentialRenewalInterceptor)
             .apply {
                 if (forceHttp1) protocols(listOf(Protocol.HTTP_1_1))
             }
@@ -3123,7 +3201,8 @@ object HttpController {
         event: EventSourceListener,
         routeTag: String? = null,
         protocolType: String = "openai_compatible",
-        wireApi: String = OpenAiWireApi.CHAT_COMPLETIONS
+        wireApi: String = OpenAiWireApi.CHAT_COMPLETIONS,
+        cloudCredential: MonkeyCodeCloudCredential? = null,
     ): EventSource = withContext(Dispatchers.IO) {
         if (protocolType == "anthropic") {
             val resolved = ResolvedSceneRequest(
@@ -3143,7 +3222,8 @@ object HttpController {
                 bindingProfileMissing = false,
                 overrideApplied = false,
                 overrideModel = null,
-                protocolType = "anthropic"
+                protocolType = "anthropic",
+                cloudCredential = cloudCredential,
             )
             val anthropicJson = convertToAnthropicRequestJson(chatRequest.copy(stream = true))
             return@withContext postAnthropicStreamRequest(
@@ -3176,7 +3256,9 @@ object HttpController {
             url = url,
             requestBody = requestBody,
             apiKey = apiKey,
-            customHeaders = customHeaders
+            customHeaders = customHeaders,
+            cloudCredential = cloudCredential,
+            requestJson = requestJson,
         )
             .addHeader("Accept", "text/event-stream")
             .build()
@@ -3257,7 +3339,9 @@ object HttpController {
             url = url,
             requestBody = requestBody,
             apiKey = resolved.apiKey,
-            customHeaders = resolved.customHeaders
+            customHeaders = resolved.customHeaders,
+            cloudCredential = resolved.cloudCredential,
+            requestJson = preparedRequestJson,
         )
             .addHeader("Accept", "text/event-stream")
             .build()
@@ -3353,7 +3437,8 @@ object HttpController {
             event = event,
             routeTag = resolved.routeTag,
             protocolType = resolved.protocolType,
-            wireApi = resolved.wireApi
+            wireApi = resolved.wireApi,
+            cloudCredential = resolved.cloudCredential,
         )
     }
 
@@ -3403,7 +3488,8 @@ object HttpController {
             event = event,
             routeTag = resolved.routeTag,
             protocolType = resolved.protocolType,
-            wireApi = resolved.wireApi
+            wireApi = resolved.wireApi,
+            cloudCredential = resolved.cloudCredential,
         )
     }
 
@@ -3541,7 +3627,7 @@ object HttpController {
             )
             val anthropicUrl = buildAnthropicMessagesUrl(base)
             OmniLog.d(TAG, "=== Anthropic Request Debug ===")
-            OmniLog.d(TAG, "URL: $anthropicUrl")
+            OmniLog.d(TAG, "URL: ${redactUrlForLog(anthropicUrl)}")
             OmniLog.d(TAG, "Model: ${resolved.resolvedModel}, hasApiKey=${!resolved.apiKey.isNullOrBlank()}")
             OmniLog.d(TAG, "Request Body: ${anthropicJson.take(2000)}")
             OmniLog.d(TAG, "==============================")
@@ -3551,7 +3637,9 @@ object HttpController {
                 requestBody = requestBody,
                 apiKey = resolved.apiKey,
                 hasCacheControl = hasCacheControl(anthropicJson),
-                customHeaders = resolved.customHeaders
+                customHeaders = resolved.customHeaders,
+                cloudCredential = resolved.cloudCredential,
+                requestJson = anthropicJson,
             ).build()
             logRequestHeaders("[anthropic model=${resolved.resolvedModel}]", requestCall.headers.toMultimap().mapValues {
                 it.value.joinToString(",")
@@ -3623,7 +3711,7 @@ object HttpController {
                 )
             }
             OmniLog.d(TAG, "=== OpenAI Request Debug ===")
-            OmniLog.d(TAG, "URL: $url")
+            OmniLog.d(TAG, "URL: ${redactUrlForLog(url)}")
             OmniLog.d(TAG, "Model: ${variant.request.model}, hasApiKey=${!resolved.apiKey.isNullOrBlank()}, variant=${variant.name}")
             OmniLog.d(TAG, "Request Body: ${requestJson.take(2000)}")
             OmniLog.d(TAG, "============================")
@@ -3633,7 +3721,9 @@ object HttpController {
                 url = url,
                 requestBody = requestBody,
                 apiKey = resolved.apiKey,
-                customHeaders = resolved.customHeaders
+                customHeaders = resolved.customHeaders,
+                cloudCredential = resolved.cloudCredential,
+                requestJson = requestJson,
             ).build()
             logRequestHeaders("[openai model=${variant.request.model}]", requestCall.headers.toMultimap().mapValues {
                 it.value.joinToString(",")

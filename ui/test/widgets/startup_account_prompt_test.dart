@@ -13,6 +13,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   const accountChannel = MethodChannel('cn.com.omnimind.bot/account');
+  const cloudChannel = MethodChannel('cn.com.omnimind.bot/McCloudAccount');
 
   setUp(() async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
@@ -25,11 +26,20 @@ void main() {
           }
           return null;
         });
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(cloudChannel, (call) async {
+          if (call.method == 'getSessionState') {
+            return <String, Object?>{'signedIn': false};
+          }
+          return null;
+        });
   });
 
   tearDown(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(accountChannel, null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(cloudChannel, null);
   });
 
   testWidgets(
@@ -102,7 +112,7 @@ void main() {
             .height,
         lessThan(600),
       );
-      expect(find.text('小万通灵，云启大千'), findsOneWidget);
+      expect(find.text('连接 MonkeyCode 云，协作随行'), findsOneWidget);
       final sloganRect = tester.getRect(
         find.byKey(const ValueKey('startup-account-slogan')),
       );
@@ -220,12 +230,11 @@ void main() {
           .height,
       lessThanOrEqualTo(480),
     );
-    await tester.tap(find.byKey(const ValueKey('account-auth-mode-register')));
-    await tester.pumpAndSettle();
     expect(
-      find.byKey(const ValueKey('account-register-email')),
+      find.byKey(const ValueKey('account-auth-mode-selector')),
       findsOneWidget,
     );
+    expect(find.byKey(const ValueKey('mc-cloud-login')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

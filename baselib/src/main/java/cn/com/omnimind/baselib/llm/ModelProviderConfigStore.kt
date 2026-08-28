@@ -165,6 +165,77 @@ object ModelProviderConfigStore {
         return listProfiles().firstOrNull { it.id == profileId.trim() }
     }
 
+    fun readMonkeyCodeCloudCredential(profileId: String?): MonkeyCodeCloudCredential? {
+        val normalizedId = profileId?.trim()?.takeIf(String::isNotEmpty) ?: return null
+        val profile = getProfile(normalizedId) ?: return null
+        if (!MonkeyCodeCloudProvider.isCloudSource(profile.sourceType)) return null
+        val secrets = requireSecretStore().readProfile(normalizedId) ?: return null
+        return runCatching {
+            MonkeyCodeCloudCredential(
+                keyId = secrets.cloudKeyId,
+                apiKey = secrets.apiKey,
+                signingSecret = secrets.cloudSigningSecret,
+            )
+        }.getOrNull()
+    }
+
+    fun findMonkeyCodeCloudCredential(apiKey: String?): MonkeyCodeCloudCredential? {
+        val normalizedKey = apiKey?.trim()?.takeIf { it.startsWith("omk-") } ?: return null
+        return listProfiles()
+            .asSequence()
+            .filter { MonkeyCodeCloudProvider.isCloudSource(it.sourceType) }
+            .filter { it.apiKey == normalizedKey }
+            .mapNotNull { readMonkeyCodeCloudCredential(it.id) }
+            .firstOrNull()
+    }
+
+    fun isSecureStorageAvailable(): Boolean = secretStore?.isAvailable() == true
+
+    fun cloudProfileIds(): List<String> = listProfiles()
+        .filter { MonkeyCodeCloudProvider.isCloudSource(it.sourceType) }
+        .map { it.id }
+
+    fun firstMonkeyCodeCloudCredential(excludingProfileId: String? = null): MonkeyCodeCloudCredential? =
+        cloudProfileIds().asSequence()
+            .filter { it != excludingProfileId }
+            .mapNotNull(::readMonkeyCodeCloudCredential)
+            .firstOrNull()
+
+    @Synchronized
+    fun writeMonkeyCodeCloudCredential(
+        profileId: String,
+        credential: MonkeyCodeCloudCredential,
+    ) {
+        val normalizedId = profileId.trim()
+        val profile = requireNotNull(getProfile(normalizedId)) { "profile not found: $normalizedId" }
+        require(MonkeyCodeCloudProvider.isCloudSource(profile.sourceType)) {
+            "profile is not a MonkeyCode cloud provider"
+        }
+        val store = requireSecretStore()
+        val current = store.readProfile(normalizedId) ?: ModelProviderSecrets()
+        store.writeProfile(
+            normalizedId,
+            current.copy(
+                apiKey = credential.apiKey,
+                cloudKeyId = credential.keyId,
+                cloudSigningSecret = credential.signingSecret,
+            ),
+        )
+    }
+
+    @Synchronized
+    fun clearMonkeyCodeCloudCredential(profileId: String): String? {
+        val normalizedId = profileId.trim()
+        val store = requireSecretStore()
+        val current = store.readProfile(normalizedId) ?: return null
+        val keyId = current.cloudKeyId.takeIf(String::isNotEmpty)
+        store.writeProfile(
+            normalizedId,
+            current.copy(apiKey = "", cloudKeyId = "", cloudSigningSecret = ""),
+        )
+        return keyId
+    }
+
     fun setEditingProfile(profileId: String): ModelProviderProfile {
         val normalizedId = profileId.trim()
         require(normalizedId.isNotEmpty()) { "profileId is empty" }
@@ -216,7 +287,11 @@ object ModelProviderConfigStore {
                                 baseUrl = profile.baseUrl
                             ),
                             protocolType = normalizeProtocolType(profile.protocolType),
-                            wireApi = normalizeWireApi(profile.wireApi)
+                            wireApi = normalizeWireApi(profile.wireApi),
+                            readOnly = profile.readOnly,
+                            ready = profile.ready,
+                            statusText = profile.statusText,
+                            revision = profile.revision,
                         )
                     )
                 }
@@ -640,6 +715,9 @@ object ModelProviderConfigStore {
         if (normalizedRequested == "custom") {
             return "custom"
         }
+        if (MonkeyCodeCloudProvider.isCloudSource(normalizedRequested)) {
+            return MonkeyCodeCloudProvider.SOURCE_TYPE
+        }
         OfficialProviderRegistry.findByKey(normalizedRequested)?.let { return it.key }
         OfficialProviderRegistry.findByKey(existingSourceType)?.let { return it.key }
         OfficialProviderRegistry.findByProfileId(profileId)?.let { return it.key }
@@ -852,7 +930,9 @@ object ModelProviderConfigStore {
                     ?: legacySecrets.apiKey,
                 customHeaders = existingSecrets?.customHeaders
                     ?.takeIf { it.isNotEmpty() }
-                    ?: legacySecrets.customHeaders
+                    ?: legacySecrets.customHeaders,
+                cloudKeyId = existingSecrets?.cloudKeyId.orEmpty(),
+                cloudSigningSecret = existingSecrets?.cloudSigningSecret.orEmpty(),
             )
             val safeProfile = enforceCredentialTransport(
                 profile.copy(
@@ -865,6 +945,8 @@ object ModelProviderConfigStore {
                 ModelProviderSecrets(
                     apiKey = safeProfile.apiKey,
                     customHeaders = safeProfile.customHeaders,
+                    cloudKeyId = mergedSecrets.cloudKeyId,
+                    cloudSigningSecret = mergedSecrets.cloudSigningSecret,
                 ),
             )
             safeProfile
@@ -968,11 +1050,18 @@ object ModelProviderConfigStore {
         val previousSecrets = touchedIds.associateWith(store::readProfile)
         try {
             safeProfiles.forEach { safeProfile ->
+                val previous = previousSecrets[safeProfile.id]
+                val retainedCloudApiKey = previous?.apiKey.orEmpty().takeIf {
+                    MonkeyCodeCloudProvider.isCloudSource(safeProfile.sourceType) &&
+                        safeProfile.apiKey.isBlank()
+                }
                 store.writeProfile(
                     safeProfile.id,
                     ModelProviderSecrets(
-                        apiKey = safeProfile.apiKey,
-                        customHeaders = safeProfile.customHeaders
+                        apiKey = retainedCloudApiKey ?: safeProfile.apiKey,
+                        customHeaders = safeProfile.customHeaders,
+                        cloudKeyId = previous?.cloudKeyId.orEmpty(),
+                        cloudSigningSecret = previous?.cloudSigningSecret.orEmpty(),
                     )
                 )
             }

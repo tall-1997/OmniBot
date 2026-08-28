@@ -773,7 +773,7 @@ Widget _testApp() {
       GlobalWidgetsLocalizations.delegate,
       GlobalCupertinoLocalizations.delegate,
     ],
-    home: AccountPage(),
+    home: LegacyAccountPage(),
   );
 }
 

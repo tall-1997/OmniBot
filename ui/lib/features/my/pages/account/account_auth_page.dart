@@ -20,7 +20,7 @@ class AccountAuthPage extends StatelessWidget {
       key: const ValueKey('standalone-account-auth-page'),
       backgroundColor: context.omniPalette.pageBackground,
       appBar: CommonAppBar(
-        title: _text(context, '登录与注册', 'Sign in or register'),
+        title: _text(context, '连接 MonkeyCode 云', 'Connect to MonkeyCode Cloud'),
         primary: true,
         onBackPressed: () => Navigator.of(context).maybePop(),
       ),

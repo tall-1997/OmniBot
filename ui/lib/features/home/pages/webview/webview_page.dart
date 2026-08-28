@@ -18,6 +18,7 @@ class WebViewPage extends StatefulWidget {
   final bool enableZoom;
   final bool showRefreshButton;
   final bool appBarBackClosesPage;
+  final Future<bool> Function(String url)? onNavigationUrl;
 
   const WebViewPage({
     super.key,
@@ -28,6 +29,7 @@ class WebViewPage extends StatefulWidget {
     this.enableZoom = true,
     this.showRefreshButton = false,
     this.appBarBackClosesPage = false,
+    this.onNavigationUrl,
   });
 
   @override
@@ -91,21 +93,21 @@ class _WebViewPageState extends State<WebViewPage> {
             });
           },
           onPageStarted: (String url) {
-            debugPrint('WebView onPageStarted: $url');
+            debugPrint('WebView onPageStarted: ${redactWebViewUrl(url)}');
             setState(() {
               _isLoading = true;
               _errorMessage = null;
             });
           },
           onPageFinished: (String url) {
-            debugPrint('WebView onPageFinished: $url');
+            debugPrint('WebView onPageFinished: ${redactWebViewUrl(url)}');
             setState(() {
               _isLoading = false;
             });
           },
           onWebResourceError: (WebResourceError error) {
             debugPrint(
-              'WebView onWebResourceError: ${error.description} (${error.url})',
+              'WebView onWebResourceError: ${error.description} (${redactWebViewUrl(error.url)})',
             );
             if (error.isForMainFrame == false) {
               return;
@@ -115,7 +117,10 @@ class _WebViewPageState extends State<WebViewPage> {
               _errorMessage = error.description;
             });
           },
-          onNavigationRequest: (NavigationRequest request) {
+          onNavigationRequest: (NavigationRequest request) async {
+            if (await widget.onNavigationUrl?.call(request.url) == true) {
+              return NavigationDecision.prevent;
+            }
             // 检查是否为可下载文件
             if (_isDownloadableUrl(request.url)) {
               _handleDownload(request.url);
@@ -133,7 +138,7 @@ class _WebViewPageState extends State<WebViewPage> {
     _loadInitialSource();
 
     // 打印加载的 URL
-    debugPrint('WebViewPage 加载 URL: ${widget.url}');
+    debugPrint('WebViewPage 加载 URL: ${redactWebViewUrl(widget.url)}');
   }
 
   Future<void> _loadInitialSource() async {
@@ -368,6 +373,18 @@ class _WebViewPageState extends State<WebViewPage> {
       ),
     );
   }
+}
+
+String redactWebViewUrl(String? value) {
+  final uri = Uri.tryParse(value ?? '');
+  if (uri == null || !uri.hasScheme) return '<invalid-url>';
+  return uri
+      .replace(
+        userInfo: '',
+        query: uri.hasQuery ? 'redacted' : null,
+        fragment: uri.hasFragment ? 'redacted' : null,
+      )
+      .toString();
 }
 
 String? _resolveLocalFilePath(String source) {

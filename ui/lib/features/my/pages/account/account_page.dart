@@ -11,6 +11,8 @@ import 'package:ui/widgets/common_app_bar.dart';
 import 'package:ui/widgets/settings_detail_sheet.dart';
 import 'package:ui/widgets/settings_section_title.dart';
 
+export 'mc_cloud_account_page.dart' show AccountPage;
+
 String formatWeeklyQuotaResetCountdown(DateTime now, {required bool english}) {
   final startOfToday = DateTime(now.year, now.month, now.day);
   final nextMonday = startOfToday.add(Duration(days: 8 - now.weekday));
@@ -21,13 +23,13 @@ String formatWeeklyQuotaResetCountdown(DateTime now, {required bool english}) {
   return english ? '${days}d ${hours}h' : '$days天 $hours小时';
 }
 
-class AccountPage extends StatefulWidget {
-  const AccountPage({super.key})
+class LegacyAccountPage extends StatefulWidget {
+  const LegacyAccountPage({super.key})
     : authOnly = false,
       onAuthenticated = null,
       showAuthHeading = true;
 
-  const AccountPage.authOnly({
+  const LegacyAccountPage.authOnly({
     super.key,
     this.onAuthenticated,
     this.showAuthHeading = true,
@@ -38,10 +40,10 @@ class AccountPage extends StatefulWidget {
   final bool showAuthHeading;
 
   @override
-  State<AccountPage> createState() => _AccountPageState();
+  State<LegacyAccountPage> createState() => _LegacyAccountPageState();
 }
 
-class _AccountPageState extends State<AccountPage> {
+class _LegacyAccountPageState extends State<LegacyAccountPage> {
   final _formKey = GlobalKey<FormState>();
   final _registerFormKey = GlobalKey<FormState>();
   final _authPageController = PageController();
@@ -82,12 +84,17 @@ class _AccountPageState extends State<AccountPage> {
     _authPageController.dispose();
     _registerPasswordFocusNode.removeListener(_onRegisterPasswordFocusChanged);
     _registerPasswordFocusNode.dispose();
-    _emailController.dispose();
-    _registerEmailController.dispose();
-    _passwordController.dispose();
-    _registerPasswordController.dispose();
-    _confirmPasswordController.dispose();
-    _verificationCodeController.dispose();
+    for (final controller in [
+      _emailController,
+      _registerEmailController,
+      _passwordController,
+      _registerPasswordController,
+      _confirmPasswordController,
+      _verificationCodeController,
+    ]) {
+      controller.clear();
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -902,11 +909,20 @@ class _AccountPageState extends State<AccountPage> {
       case 'too_many_requests':
         return _text('操作太频繁，请稍后再试', 'Too many attempts. Try again later.');
       case 'verification_unavailable':
-        return _text('验证码服务暂时不可用，请稍后重试', 'Verification service is temporarily unavailable.');
+        return _text(
+          '验证码服务暂时不可用，请稍后重试',
+          'Verification service is temporarily unavailable.',
+        );
       case 'account_service_unavailable':
-        return _text('账号服务暂时不可用，请稍后重试', 'Account service is temporarily unavailable.');
+        return _text(
+          '账号服务暂时不可用，请稍后重试',
+          'Account service is temporarily unavailable.',
+        );
       case 'ACCOUNT_FEATURE_UNAVAILABLE':
-        return _text('当前账号服务版本不支持注册，请稍后重试', 'This account service does not support registration yet.');
+        return _text(
+          '当前账号服务版本不支持注册，请稍后重试',
+          'This account service does not support registration yet.',
+        );
       case 'current_password_invalid':
         return _text('当前密码不正确', 'The current password is incorrect');
       case 'password_reuse':

@@ -32,7 +32,7 @@ class ChannelManager {
     private var agentRuntimeChannel: AgentRuntimeChannel = AgentRuntimeChannel()
     private var pluginPlatformChannel: PluginPlatformChannel = PluginPlatformChannel()
     private var omniLinkPluginChannel: OmniLinkPluginChannel = OmniLinkPluginChannel()
-    private var accountChannel: AccountChannel = AccountChannel()
+    private var mcCloudAccountChannel: McCloudAccountChannel = McCloudAccountChannel()
     private var voicePlaybackChannel: VoicePlaybackChannel = VoicePlaybackChannel()
     fun getUIRouterChannel(): UIRouterChannel {
         return uiRouterChannel
@@ -64,7 +64,7 @@ class ChannelManager {
         agentRuntimeChannel.setChannel(flutterEngine)
         pluginPlatformChannel.setChannel(flutterEngine)
         omniLinkPluginChannel.setChannel(flutterEngine)
-        accountChannel.setChannel(flutterEngine)
+        mcCloudAccountChannel.setChannel(flutterEngine)
         // Flutter may configure the engine before Activity.onCreate reaches
         // ChannelManager.onCreate.  Ensure the voice manager exists in either
         // lifecycle order so the event channel is never silently unbound.
@@ -89,6 +89,7 @@ class ChannelManager {
         agentRuntimeChannel.onCreate(context)
         pluginPlatformChannel.onCreate(context)
         omniLinkPluginChannel.onCreate(context)
+        mcCloudAccountChannel.onCreate(context)
         voicePlaybackChannel.onCreate(context)
     }
 
@@ -114,8 +115,12 @@ class ChannelManager {
         agentRuntimeChannel.clear()
         pluginPlatformChannel.clear()
         omniLinkPluginChannel.clear()
-        accountChannel.clear()
+        mcCloudAccountChannel.clear()
         voicePlaybackChannel.clear()
+    }
+
+    fun shutdown() {
+        mcCloudAccountChannel.shutdown()
     }
 
 

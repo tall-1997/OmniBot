@@ -518,6 +518,7 @@ class AppDialog {
     double? buttonTextSize,
     Color? confirmButtonColor,
     bool glassStyle = false,
+    Duration confirmDelay = Duration.zero,
   }) {
     return showDialog<bool>(
       context: context,
@@ -532,6 +533,7 @@ class AppDialog {
         confirmButtonColor: confirmButtonColor,
         buttonTextSize: buttonTextSize,
         glassStyle: glassStyle,
+        confirmDelay: confirmDelay,
       ),
     );
   }
@@ -668,6 +670,7 @@ class _AppDialogWidget extends StatefulWidget {
   final int? selectedIndex;
   final double? buttonTextSize;
   final bool glassStyle;
+  final Duration confirmDelay;
 
   const _AppDialogWidget({
     required this.title,
@@ -684,6 +687,7 @@ class _AppDialogWidget extends StatefulWidget {
     this.selectedIndex,
     this.buttonTextSize,
     this.glassStyle = false,
+    this.confirmDelay = Duration.zero,
   });
 
   @override
@@ -693,17 +697,33 @@ class _AppDialogWidget extends StatefulWidget {
 class _AppDialogWidgetState extends State<_AppDialogWidget> {
   late TextEditingController _textController;
   int? _selectedOption;
+  Timer? _confirmDelayTimer;
+  late int _confirmDelaySeconds;
 
   @override
   void initState() {
     super.initState();
     _textController = TextEditingController(text: widget.initialValue ?? '');
     _selectedOption = widget.selectedIndex;
+    _confirmDelaySeconds = widget.confirmDelay.inSeconds;
+    if (_confirmDelaySeconds > 0) {
+      _confirmDelayTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted) return;
+        setState(() {
+          _confirmDelaySeconds =
+              (_confirmDelaySeconds - 1).clamp(0, 60).toInt();
+        });
+        if (_confirmDelaySeconds == 0) {
+          _confirmDelayTimer?.cancel();
+        }
+      });
+    }
   }
 
   @override
   void dispose() {
     _textController.dispose();
+    _confirmDelayTimer?.cancel();
     super.dispose();
   }
 
@@ -926,6 +946,7 @@ class _AppDialogWidgetState extends State<_AppDialogWidget> {
     final palette = context.omniPalette;
     final isDark = context.isDarkTheme;
     final confirmColor = widget.confirmButtonColor ?? palette.accentPrimary;
+    final confirmEnabled = _confirmDelaySeconds == 0;
     if (widget.type == DialogType.alert) {
       return Center(
         child: IntrinsicWidth(
@@ -998,7 +1019,7 @@ class _AppDialogWidgetState extends State<_AppDialogWidget> {
         const SizedBox(width: 12),
         Expanded(
           child: GestureDetector(
-            onTap: () {
+            onTap: confirmEnabled ? () {
               switch (widget.type) {
                 case DialogType.confirm:
                   Navigator.of(context).pop(true);
@@ -1012,18 +1033,24 @@ class _AppDialogWidgetState extends State<_AppDialogWidget> {
                 default:
                   Navigator.of(context).pop();
               }
-            },
+            } : null,
             child: Container(
               height: 44,
               decoration: ShapeDecoration(
-                color: confirmColor,
+                color: confirmEnabled
+                    ? confirmColor
+                    : confirmColor.withValues(alpha: 0.45),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(50),
                 ),
               ),
               child: Center(
                 child: Text(
-                  LegacyTextLocalizer.localize(widget.confirmText ?? '确认'),
+                   LegacyTextLocalizer.localize(
+                     confirmEnabled
+                         ? (widget.confirmText ?? '确认')
+                         : '请等待 $_confirmDelaySeconds 秒',
+                   ),
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Colors.white,
