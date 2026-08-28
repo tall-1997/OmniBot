@@ -337,8 +337,8 @@ jobs:
           set -euo pipefail
 
           if [[ -z "${APP_UPDATE_WORKER_URL}" || -z "${APP_UPDATE_WORKER_TOKEN}" ]]; then
-            echo "APP_UPDATE_WORKER_URL and APP_UPDATE_WORKER_TOKEN secrets are required to upload APKs." >&2
-            exit 1
+            echo "Skipping Cloudflare R2 upload because APP_UPDATE_WORKER_URL or APP_UPDATE_WORKER_TOKEN is unavailable."
+            exit 0
           fi
 
           PYTHON_BIN=python3
@@ -385,8 +385,8 @@ jobs:
           set -euo pipefail
 
           if [[ -z "${APP_UPDATE_WORKER_URL}" || -z "${APP_UPDATE_WORKER_TOKEN}" ]]; then
-            echo "APP_UPDATE_WORKER_URL and APP_UPDATE_WORKER_TOKEN secrets are required to publish update metadata." >&2
-            exit 1
+            echo "Skipping Cloudflare update metadata because APP_UPDATE_WORKER_URL or APP_UPDATE_WORKER_TOKEN is unavailable."
+            exit 0
           fi
 
           PYTHON_BIN=python3
