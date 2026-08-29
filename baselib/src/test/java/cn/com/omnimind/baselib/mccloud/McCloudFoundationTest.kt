@@ -1,8 +1,17 @@
 package cn.com.omnimind.baselib.mccloud
 
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.Dispatchers
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.Cookie
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.Protocol
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
+import okio.Timeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -87,14 +96,73 @@ class McCloudFoundationTest {
         assertFalse(McCloudOAuthHandler.isControlledCallbackPath("/oauth/authorize"))
     }
 
-    private inline fun <reified T : Throwable> assertFails(block: () -> Unit) {
+    @Test
+    fun apiClientParsesUserStatusEnvelope() = runBlocking {
+        val client = apiClient(
+            """{"code":0,"data":{"id":"user-1","email":"user@example.com","team":{"id":"team-1","name":"Team"}}}""",
+        )
+
+        val status = client.call<McCloudUserStatus>(McCloudDomain.MONKEY_CODE, "/api/v1/users/status")
+
+        assertEquals("user-1", status.id)
+        assertEquals("user@example.com", status.email)
+        assertEquals("team-1", status.team?.id)
+    }
+
+    @Test
+    fun apiClientFormatErrorIdentifiesRequestPath() {
+        val client = apiClient("""{"code":0,"data":"unexpected"}""")
+
+        val error = assertFails<McCloudApiException> {
+            runBlocking {
+                client.call<McCloudUserStatus>(McCloudDomain.MONKEY_CODE, "/api/v1/users/status")
+            }
+        }
+
+        assertEquals("云端响应格式异常（/api/v1/users/status）", error.message)
+    }
+
+    private fun apiClient(body: String): McCloudApiClient {
+        val endpoints = McCloudEndpoints(monkeyCode = "https://cloud.example", baizhi = "https://auth.example")
+        val cookieJar = McCloudCookieJar(endpoints, MemoryCookieStore())
+        return McCloudApiClient(
+            endpoints = endpoints,
+            cookieJar = cookieJar,
+            callFactory = JsonCallFactory(body),
+            ioDispatcher = Dispatchers.Unconfined,
+        )
+    }
+
+    private inline fun <reified T : Throwable> assertFails(block: () -> Unit): T {
         try {
             block()
             throw AssertionError("Expected ${T::class.java.simpleName}")
         } catch (error: Throwable) {
             if (error !is T) throw error
+            return error
         }
     }
+}
+
+private class JsonCallFactory(private val body: String) : Call.Factory {
+    override fun newCall(request: Request): Call = JsonCall(request, body)
+}
+
+private class JsonCall(private val original: Request, private val body: String) : Call {
+    override fun request(): Request = original
+    override fun execute(): Response = Response.Builder()
+        .request(original)
+        .protocol(Protocol.HTTP_1_1)
+        .code(200)
+        .message("OK")
+        .body(body.toResponseBody("application/json".toMediaType()))
+        .build()
+    override fun enqueue(responseCallback: Callback) = error("unused")
+    override fun cancel() = Unit
+    override fun isExecuted(): Boolean = false
+    override fun isCanceled(): Boolean = false
+    override fun clone(): Call = JsonCall(original, body)
+    override fun timeout(): Timeout = Timeout.NONE
 }
 
 private class MemoryCookieStore : PersistentCookieStore {

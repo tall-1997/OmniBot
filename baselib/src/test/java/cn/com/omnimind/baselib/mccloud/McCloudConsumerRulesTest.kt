@@ -16,7 +16,6 @@ class McCloudConsumerRulesTest {
             ?.readText()
             .orEmpty()
 
-        assertTrue(rules.contains("class cn.com.omnimind.baselib.mccloud.**"))
-        assertTrue(rules.contains("<fields>;"))
+        assertTrue(rules.contains("-keep class cn.com.omnimind.baselib.mccloud.** { *; }"))
     }
 }

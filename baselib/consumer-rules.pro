@@ -2,9 +2,7 @@
     public <init>(...);
 }
 
-# McCloud API payloads are decoded reflectively by Gson. Keep their field names
-# stable in minified app builds so login, captcha, and subsequent cloud calls
-# use the server's JSON contract.
--keepclassmembers,allowoptimization class cn.com.omnimind.baselib.mccloud.** {
-    <fields>;
-}
+# McCloud API payloads are created reflectively by Gson through generic
+# TypeTokens. Preserve the classes as well as their fields in full-mode R8;
+# keeping field names alone still lets R8 merge or remove reflective DTOs.
+-keep class cn.com.omnimind.baselib.mccloud.** { *; }

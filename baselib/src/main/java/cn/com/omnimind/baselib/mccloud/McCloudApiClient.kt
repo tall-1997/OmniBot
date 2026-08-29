@@ -76,7 +76,7 @@ class McCloudApiClient(
                 onUnauthorized?.invoke()
                 throw McCloudApiException(statusCode = 401, message = "登录已过期，请重新登录")
             }
-            val json = parseJson(text, it.isSuccessful, it.code)
+            val json = parseJson(text, it.isSuccessful, it.code, path)
             val code = json?.get("code")?.takeIf { element -> element.isJsonPrimitive }
                 ?.let { element -> runCatching { element.asInt }.getOrNull() }
             val message = json?.get("message")?.takeIf { element -> element.isJsonPrimitive }
@@ -109,7 +109,7 @@ class McCloudApiClient(
                 @Suppress("UNCHECKED_CAST")
                 gson.fromJson<T>(payload, type)
             } catch (error: JsonParseException) {
-                throw McCloudApiException(it.code, code, "云端响应格式异常", error)
+                throw McCloudApiException(it.code, code, "云端响应格式异常（$path）", error)
             }
         }
     }
@@ -118,12 +118,14 @@ class McCloudApiClient(
         Unit
     }
 
-    private fun parseJson(text: String, successful: Boolean, status: Int): JsonObject? {
+    private fun parseJson(text: String, successful: Boolean, status: Int, path: String): JsonObject? {
         if (text.isBlank()) return null
         return try {
             gson.fromJson(text, JsonObject::class.java)
         } catch (error: JsonParseException) {
-            if (successful) throw McCloudApiException(status, message = "云端响应格式异常", cause = error)
+            if (successful) {
+                throw McCloudApiException(status, message = "云端响应格式异常（$path：响应不是 JSON）", cause = error)
+            }
             throw McCloudApiException(status, message = "请求失败（$status）", cause = error)
         }
     }
