@@ -58,5 +58,6 @@
 - 2026-08-29: Synchronized cloud model inventories now feed the existing Provider selector directly; current `oma_*` and legacy `omk-*` proxy keys are accepted, and scene/conversation overrides preserve cloud routing and dynamic signatures.
 - 2026-08-29: Cloud tasks now appear in the Home task sidebar and open as `mccloud` ACP sessions in the shared chat page; rounds and live `new`/`attach` streams use the existing reducer and coordinator.
 - 2026-08-29: Focused Kotlin verification passed for cloud model inventory, proxy signing, stream modes, and McCloud ACP session mapping; 128 focused Flutter model, drawer, routing, session, and coordinator tests passed.
-- The full 21-requirement end-to-end acceptance remains open.
+- 2026-08-29: `v0.6.0.7` released (commit `8b3ac8c2e`, tag `v0.6.0.7`, branch `release/0.6.0.7`, run `33243891188`, `versionCode = 14`). APK `OpenOmniBot-v0.6.0.7-standard.apk` is 59,427,066 bytes with SHA-256 `50fb10300b6928e3fb055b0a3b08a6d6ac6d6e10da5b85d955bbb11c02fc50ec`; `manifest.txt` marks `signing=test`, and `apksigner` confirms the Android debug test certificate. Release body marks the build as a test-signed prerelease.
+- The full 22-requirement end-to-end acceptance remains open.
 - Douyin authorization remains blocked on an OmniBot-bound ClientKey and signing configuration.
