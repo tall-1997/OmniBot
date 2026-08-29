@@ -97,15 +97,15 @@ class McCloudFoundationTest {
     }
 
     @Test
-    fun apiClientParsesUserStatusEnvelope() = runBlocking {
+    fun apiClientParsesNestedUserStatusEnvelope() = runBlocking {
         val client = apiClient(
-            """{"code":0,"data":{"id":"user-1","email":"user@example.com","team":{"id":"team-1","name":"Team"}}}""",
+            """{"code":0,"data":{"user":{"id":"user-1","email":"user@example.com"},"team":{"id":"team-1","name":"Team"}}}""",
         )
 
         val status = client.call<McCloudUserStatus>(McCloudDomain.MONKEY_CODE, "/api/v1/users/status")
 
-        assertEquals("user-1", status.id)
-        assertEquals("user@example.com", status.email)
+        assertEquals("user-1", status.user?.id)
+        assertEquals("user@example.com", status.user?.email)
         assertEquals("team-1", status.team?.id)
     }
 
