@@ -71,8 +71,6 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
     _omniLinkEventSubscription = OmniLinkPluginService.events.listen(
       _handleOmniLinkEvent,
     );
-    unawaited(_refreshAgentRuntimeStatus());
-
     _inputFocusNode.addListener(_onFocusChange);
     _messageController.addListener(_handleSlashCommandInput);
     final bootstrapFuture = _bootstrapConversationThread();
@@ -218,7 +216,9 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
       requestId: requestId,
     );
     if (!_isConversationTargetRequestCurrent(requestId)) return;
-    unawaited(_loadNormalChatModelContext());
+    if (target.agentRuntime != 'mccloud') {
+      unawaited(_loadNormalChatModelContext());
+    }
     unawaited(_refreshLiveBrowserSessionSnapshot(syncRuntime: true));
   }
 
@@ -264,6 +264,9 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
       _isBrowserOverlayVisible = false;
       _isSurfacePageScrolling = false;
     });
+    if (effectiveTarget.agentRuntime != 'mccloud') {
+      unawaited(_refreshAgentRuntimeStatus());
+    }
     // A new Harness target without a conversationId is a new conversation.
     // The previous conversation remains persisted in history and is not
     // implicitly inherited by the new Harness.
@@ -275,13 +278,14 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
       );
     }
     _applyDraftForConversationMode(targetMode);
-    if (effectiveTarget.isRemoteCodexSessionTarget) {
+    if (effectiveTarget.isStandaloneAgentSessionTarget) {
       await _prepareRemoteCodexSessionTarget(effectiveTarget);
     } else {
       await initializeConversation(lifecycleToken: lifecycleToken);
     }
     if (isStaleRequest()) return;
-    if (_activeConversationMode == ChatPageMode.agent) {
+    if (_activeConversationMode == ChatPageMode.agent &&
+        effectiveTarget.agentRuntime != 'mccloud') {
       await _refreshAgentCommandPreferences();
       if (isStaleRequest()) return;
     }
@@ -317,7 +321,7 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
 
   void _restoreLocalAgentThreadIdFromTarget(ConversationThreadTarget target) {
     if (target.mode != ConversationMode.agent ||
-        target.isRemoteCodexSessionTarget) {
+        target.isStandaloneAgentSessionTarget) {
       return;
     }
     final threadId = target.agentSessionId?.trim();
@@ -330,7 +334,6 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
   bool _shouldSyncExistingLocalAgentTarget(ConversationThreadTarget target) {
     return target.mode == ConversationMode.agent &&
         !target.isNewConversation &&
-        !target.isRemoteCodexSessionTarget &&
         target.conversationId != null;
   }
 
@@ -527,7 +530,18 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
       return;
     }
     _resolvedThreadTarget = visibleTarget;
-    if (visibleTarget.isRemoteCodexSessionTarget ||
+    if (visibleTarget.agentRuntime == 'mccloud' &&
+        visibleTarget.isAgentSessionTarget) {
+      await ConversationHistoryService.saveLastVisibleThreadTarget(
+        visibleTarget,
+      );
+      await ConversationHistoryService.saveCurrentConversationTarget(
+        visibleTarget,
+        mode: visibleTarget.mode,
+      );
+      return;
+    }
+    if (visibleTarget.isStandaloneAgentSessionTarget ||
         (_activeConversationMode == ChatPageMode.agent &&
             _isRemoteCodexRuntimeActiveForMode(ChatPageMode.agent))) {
       return;
@@ -755,7 +769,9 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
     unawaited(_handleDidPopNext());
     unawaited(_syncVisibleChatConversation());
     unawaited(_syncPetOverlayState());
-    unawaited(_refreshAgentRuntimeStatus());
+    if (!_isMcCloudSessionTarget) {
+      unawaited(_refreshAgentRuntimeStatus());
+    }
   }
 
   @override
@@ -775,6 +791,7 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
   }
 
   Future<void> _handleDidPopNext() async {
+    if (_isMcCloudSessionTarget) return;
     final lifecycleToken = captureConversationLifecycleToken();
     await checkConversationExists(lifecycleToken: lifecycleToken);
     if (!mounted || !isConversationLifecycleTokenCurrent(lifecycleToken)) {
@@ -1149,7 +1166,8 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
     super.didChangeAppLifecycleState(state);
     if ((state == AppLifecycleState.resumed ||
             state == AppLifecycleState.inactive) &&
-        _currentConversationId != null) {
+        _currentConversationId != null &&
+        !_isMcCloudSessionTarget) {
       Future.delayed(const Duration(milliseconds: 100), () async {
         if (!mounted) return;
         await checkConversationExists();
@@ -1159,7 +1177,9 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
       unawaited(_syncVisibleChatConversation());
       unawaited(_syncPetOverlayState());
       unawaited(AppUpdateService.refreshIfNeeded());
-      unawaited(_loadNormalChatModelContext());
+      if (!_isMcCloudSessionTarget) {
+        unawaited(_loadNormalChatModelContext());
+      }
       unawaited(_refreshLiveBrowserSessionSnapshot(syncRuntime: true));
     }
     if (state == AppLifecycleState.inactive ||
@@ -1172,7 +1192,9 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
     if (state == AppLifecycleState.paused) {
       // 根页面的系统返回由 Android 直接处理，不会再经过 Dart 的 pop 回调。
       // 在页面离开前台后异步完成会话，既保留原有语义，也不阻塞返回桌面动画。
-      unawaited(saveConversationWithSummary());
+      if (!_isMcCloudSessionTarget) {
+        unawaited(saveConversationWithSummary());
+      }
     }
   }
 
@@ -1184,6 +1206,10 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
       return;
     }
     final target = _visibleThreadTarget;
+    if (_isMcCloudSessionTarget) {
+      await _clearVisibleChatConversation();
+      return;
+    }
     if (target == null || target.isNewConversation) {
       await AssistsMessageService.setVisibleChatConversation(
         conversationMode: activeConversationModeValue.storageValue,

@@ -482,12 +482,16 @@ mixin _ChatPageConversationFlowMixin on _ChatPageStateBase {
       final messageText = (text ?? _messageController.text).trim();
       final hasAttachments = _pendingAttachments.isNotEmpty;
       if ((messageText.isEmpty && !hasAttachments) || _isAiResponding) return;
-      if (!hasAttachments &&
+      if (!_isMcCloudSessionTarget &&
+          !hasAttachments &&
           ManualRecordingFlowController.isCommand(messageText)) {
         await _startManualRecordingCommand(messageText);
         return;
       }
-      if (!await _ensureNormalChatModelConfigurationForSend()) return;
+      if (!_isMcCloudSessionTarget &&
+          !await _ensureNormalChatModelConfigurationForSend()) {
+        return;
+      }
 
       final attachments = _pendingAttachments
           .map((item) => item.toMap())
@@ -590,7 +594,7 @@ mixin _ChatPageConversationFlowMixin on _ChatPageStateBase {
       return;
     }
 
-    if (runSlashCommand) {
+    if (runSlashCommand && !_isMcCloudSessionTarget) {
       final handledSlash = await _tryHandleSlashCommand(
         messageText,
         attachments: attachments,
@@ -603,7 +607,10 @@ mixin _ChatPageConversationFlowMixin on _ChatPageStateBase {
       _showOpenClawCommandPanel(expand: true);
       return;
     }
-    if (!await _ensureNormalChatModelConfigurationForSend()) return;
+    if (!_isMcCloudSessionTarget &&
+        !await _ensureNormalChatModelConfigurationForSend()) {
+      return;
+    }
 
     _inputFocusNode.unfocus();
     final retainedUserMessageIndex = retainedUserMessageId == null
@@ -1362,7 +1369,9 @@ mixin _ChatPageConversationFlowMixin on _ChatPageStateBase {
     if (_currentConversationId != null) {
       _syncRuntimeSnapshotForMode(_activeMode);
     }
-    unawaited(saveConversation());
+    if (!_isMcCloudSessionTarget) {
+      unawaited(saveConversation());
+    }
   }
 
   @override

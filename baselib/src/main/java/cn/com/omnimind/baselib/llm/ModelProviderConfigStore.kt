@@ -120,6 +120,8 @@ object ModelProviderConfigStore {
         val wireApi: String? = null,
         @field:SerializedName("revision")
         val revision: Long? = null,
+        @field:SerializedName("modelIds")
+        val modelIds: List<String>? = null,
     )
 
     fun listProfiles(): List<ModelProviderProfile> {
@@ -180,7 +182,7 @@ object ModelProviderConfigStore {
     }
 
     fun findMonkeyCodeCloudCredential(apiKey: String?): MonkeyCodeCloudCredential? {
-        val normalizedKey = apiKey?.trim()?.takeIf { it.startsWith("omk-") } ?: return null
+        val normalizedKey = apiKey?.trim()?.takeIf(String::isNotEmpty) ?: return null
         return listProfiles()
             .asSequence()
             .filter { MonkeyCodeCloudProvider.isCloudSource(it.sourceType) }
@@ -292,6 +294,7 @@ object ModelProviderConfigStore {
                             ready = profile.ready,
                             statusText = profile.statusText,
                             revision = profile.revision,
+                            modelIds = normalizeModelIds(profile.modelIds),
                         )
                     )
                 }
@@ -838,6 +841,7 @@ object ModelProviderConfigStore {
                     protocolType = normalizeProtocolType(profile.protocolType),
                     wireApi = normalizeWireApi(profile.wireApi),
                     revision = revision,
+                    modelIds = normalizeModelIds(profile.modelIds.orEmpty()),
                 )
             }
     }
@@ -865,10 +869,16 @@ object ModelProviderConfigStore {
                 protocolType = normalizeProtocolType(profile.protocolType),
                 wireApi = normalizeWireApi(profile.wireApi),
                 revision = profile.revision,
+                modelIds = normalizeModelIds(profile.modelIds),
             )
         }
         return gson.toJson(normalized)
     }
+
+    private fun normalizeModelIds(modelIds: List<String>): List<String> = modelIds
+        .map(String::trim)
+        .filter(String::isNotEmpty)
+        .distinct()
 
     /** Encodes only non-secret provider metadata for storage in MMKV. */
     internal fun encodeProfilesMetadataJson(profiles: List<ModelProviderProfile>): String {

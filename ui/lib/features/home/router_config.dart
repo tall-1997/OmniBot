@@ -44,12 +44,31 @@ ConversationMode _parseConversationMode(String? rawValue) {
   return ConversationMode.fromStorageValue(rawValue);
 }
 
-ConversationThreadTarget? _parseChatThreadTarget(GoRouterState state) {
+ConversationThreadTarget? parseChatThreadTargetUri(Uri uri) {
   final queryConversationId =
-      state.uri.queryParameters['conversationId']?.trim() ?? '';
-  final queryMode = _parseConversationMode(state.uri.queryParameters['mode']);
-  final queryRequestKey = state.uri.queryParameters['requestKey']?.trim();
-  final queryAgentId = state.uri.queryParameters['agentId']?.trim();
+      uri.queryParameters['conversationId']?.trim() ?? '';
+  final queryMode = _parseConversationMode(uri.queryParameters['mode']);
+  final queryRequestKey = uri.queryParameters['requestKey']?.trim();
+  final queryAgentId = uri.queryParameters['agentId']?.trim();
+  final queryAgentSessionId =
+      uri.queryParameters['agentSessionId']?.trim() ?? '';
+  final queryAgentRuntime = uri.queryParameters['agentRuntime']?.trim();
+  final queryAgentSessionActive =
+      uri.queryParameters.containsKey('agentSessionActive')
+      ? uri.queryParameters['agentSessionActive'] == 'true'
+      : null;
+  if (queryAgentSessionId.isNotEmpty) {
+    return ConversationThreadTarget.agentSession(
+      sessionId: queryAgentSessionId,
+      runtime: queryAgentRuntime?.isNotEmpty == true
+          ? queryAgentRuntime!
+          : 'remote',
+      agentId: queryAgentId?.isEmpty == true ? null : queryAgentId,
+      agentSessionActive: queryAgentSessionActive,
+      fromNativeRoute: true,
+      requestKey: queryRequestKey?.isEmpty == true ? null : queryRequestKey,
+    );
+  }
   if (queryConversationId.isNotEmpty) {
     if (queryConversationId == 'new' || queryConversationId == '__new__') {
       return ConversationThreadTarget.newConversation(
@@ -70,6 +89,12 @@ ConversationThreadTarget? _parseChatThreadTarget(GoRouterState state) {
       );
     }
   }
+  return null;
+}
+
+ConversationThreadTarget? _parseChatThreadTarget(GoRouterState state) {
+  final queryTarget = parseChatThreadTargetUri(state.uri);
+  if (queryTarget != null) return queryTarget;
 
   final extra = state.extra;
   if (extra is ConversationThreadTarget) {

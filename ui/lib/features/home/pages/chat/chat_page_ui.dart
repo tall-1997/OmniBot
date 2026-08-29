@@ -2589,7 +2589,8 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
       showToast('No content to send after editing', type: ToastType.warning);
       return;
     }
-    if (!await _ensureNormalChatModelConfigurationForSend()) {
+    if (!_isMcCloudSessionTarget &&
+        !await _ensureNormalChatModelConfigurationForSend()) {
       return;
     }
 
@@ -2683,7 +2684,8 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
       );
       return;
     }
-    if (!await _ensureNormalChatModelConfigurationForSend()) {
+    if (!_isMcCloudSessionTarget &&
+        !await _ensureNormalChatModelConfigurationForSend()) {
       return;
     }
 
@@ -3006,7 +3008,6 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
     content.remove('agentErrorText');
     return message.copyWith(content: content, isError: false);
   }
-
 
   String _formatTokenCount(int value) {
     return value.toString().replaceAllMapped(

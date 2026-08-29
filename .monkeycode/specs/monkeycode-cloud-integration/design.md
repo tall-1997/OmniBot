@@ -1,7 +1,7 @@
 # MonkeyCode 云端集成
 
 Feature Name: monkeycode-cloud-integration
-Updated: 2026-08-28
+Updated: 2026-08-29
 
 ## Description
 
@@ -13,11 +13,13 @@ Updated: 2026-08-28
 2. **Kotlin 客户端 + MethodChannel**：网络与会话逻辑放 Kotlin `baselib`（OkHttp + 加密 CookieJar），Flutter 经 MethodChannel 桥接，与现有 `account_service.dart` 模式一致。
 3. **新增云模型渠道，本地能力全保留**：OmniBot 本地 Agent 运行时（`AgentRuntimeManager`/`AgentOrchestrator`/`OmniAgentExecutor`/`SubagentDispatcher`/`LocalAcpRuntime`）、assists 状态机、Room 数据库与本地 BYOK 全部保留；云端登录后在现有 AI 渠道（platform/byok）之外新增"MonkeyCode 云模型"渠道，作为新 Provider 类型供本地 Agent 调用，现有本地 BYOK 提供商、Key、场景选择保持不变。
 4. **官方 AI 渠道退役**：`omni-account` 的 platform 模式（品牌模型网关）随账户体系替换一并退役；登录切换为云后该渠道无 JWT token 来源，其代码路径从 AI 路由中移除。
-5. **云模型走后端代理（参考 Windows 桌面版）**：Phase 2 中云自定义模型接入聊天时，复用桌面版已验证的 OhMyAgent 代理闭环——登录后 `POST /api/v1/users/ohmyagent/api-keys` 领取代理凭据 `{id, api_key("omk-*"), signing_secret}`；聊天请求发往后端 llmproxy 端点 `{server}/v1/chat/completions|responses|messages`，`Bearer/X-Api-Key = omk key`，请求头携带 `X-OhMyAgent-Signature: v1=<hex(HMAC-SHA256(signing_secret, system_prompt))>`；后端按 key 解析模型、替换为真实模型名、验签后代理上游并记录用量。客户端不接触第三方模型 `api_key`。该接口为官方支持（桌面版 `mc_ohmyagent_key_create` 对应实现，见 References），无额外前置条件。
+5. **云模型走后端代理（参考 Windows 桌面版）**：Phase 2 中云自定义模型接入聊天时，复用桌面版已验证的 OhMyAgent 代理闭环——登录后 `POST /api/v1/users/ohmyagent/api-keys` 领取代理凭据 `{id, api_key, signing_secret}`；当前后端生成 `oma_*`，历史环境可能返回 `omk-*`。聊天请求发往后端 llmproxy 端点 `{server}/v1/chat/completions|responses|messages`，`Bearer/X-Api-Key = api_key`，请求头携带 `X-OhMyAgent-Signature: v1=<hex(HMAC-SHA256(signing_secret, system_prompt))>`；后端按 key 解析模型、替换为真实模型名、验签后代理上游并记录用量。客户端不接触第三方模型 `api_key`。该接口为官方支持（桌面版 `mc_ohmyagent_key_create` 对应实现，见 References），无额外前置条件。
 6. **存量会话作废**：升级后既有 `omni-account` 登录会话直接作废，用户需用 MonkeyCode 云账号重新登录；本地 BYOK 提供商、Key、场景选择保留。
 7. **微信扫码登录（参考 Windows 桌面版）**：复用桌面版已验证的百智云微信 OAuth 协议——`GET /api/v1/user/oauth/login?platform=wechat` 取授权地址 → 解析二维码 uuid → 下发二维码图片 → 以 `lp.<授权页域名>` 基址长轮询 `wx_errcode`（408 待扫码/404 待确认/403 取消/402|500 过期/405 成功）→ 拿 `wx_code` 走百智云回调完成登录。与手机号/支付宝/抖音登录同走百智云 Cookie 罐。本期保持此扫码形态；微信 App 内一键授权（OpenSDK）为已登记的服务端改造项，见"后续改造项"。
 8. **云端任务执行（参考 Windows 桌面版）**：云端任务页在列表之外支持创建任务（任务选项接口拉宿主/镜像/CLI/资源默认值 → `POST /api/v1/users/tasks`）、云端 WebSocket 流式跟随执行输出、停止当前轮（`PUT /api/v1/users/tasks/stop`）、删除任务、按游标回放历史轮次与提问索引。WS 拨号端点 `GET /api/v1/users/tasks/stream?id={}&mode=stream|control`（`http`→`wss`），断线指数退避重连封顶 30 秒。
 9. **云端任务文件管理（参考 Windows 桌面版）**：附件走预签名直传对象存储；VM 工作区文件支持 multipart 上传与流式下载（目录由服务端打包 zip），下载可取消并清理残件。
+10. **云模型目录使用同步清单**：每个 MonkeyCode 云 profile 保存确定的服务端模型名与协议，模型选择器直接读取同步目录；llmproxy 仅承担推理代理，不作为模型发现接口。
+11. **云任务接入共享 ACP 会话**：Android `McCloudAcpSessionAdapter` 将任务列表、详情、rounds 和 stream 映射为 `session/list/load/prompt/cancel/update`；Flutter 侧复用 `AgentEventReducer`、`ChatConversationRuntimeCoordinator` 和现有聊天页面。
 
 迁移基于"本项目已有相关代码和功能"：不搬运 React Native 与 Tauri 代码，在 OmniBot 技术栈内重写 MonkeyCode 移动端与桌面端能力。
 
@@ -49,6 +51,9 @@ graph TD
     P --> R["云端任务 WS(stream/control)"]
     Q --> S["对象存储(presign 直传)"]
     Q --> T["VM 工作区上传/下载"]
+    P --> U["McCloudAcpSessionAdapter"]
+    U --> V["共享 ACP session 边界"]
+    V --> W["AgentEventReducer 与正常对话 UI"]
 ```
 
 ```mermaid
@@ -86,6 +91,7 @@ graph TD
 | `McCloudTaskStream` | 云端任务 WS 桥 | connect / onEvent / control（停止/继续）/ disconnect；stream 管道流式输出，断线指数退避重连（封顶 30 秒），拨号超时 30 秒 |
 | `McCloudFileManager` | 云端文件 | uploadAttachment（presign 直传）/ uploadVmFile（multipart）/ downloadVmFile（流式落盘，目录 zip）/ cancelDownload |
 | `McCloudOhmyAgentKeyRepository` | 代理凭据（Phase 2） | createKey（`POST /api/v1/users/ohmyagent/api-keys`）/ deleteKey（`DELETE .../{id}`），omk key 与 signing_secret 加密存储 |
+| `McCloudAcpSessionAdapter` | 云任务统一会话适配 | session/list / session/load / session/prompt / session/cancel；rounds 与 task stream 映射为 session/update |
 | `McCloudCaptchaSolver` | go-cap PoW 求解 | `solveChallenges(challenge): IntArray`，`obtainCaptchaToken(domain: monkeycode\|baizhi): String`——monkeycode 与 baizhi 为两个独立 captcha 服务（独立 challenge/redeem 端点与独立 Cookie 罐） |
 | `McCloudOAuthHandler` | 百智云 OAuth | sendPhoneCode / loginPhone / prepareAlipayAppLogin / loginAlipayApp / loginDouyinApp / getGitHubLoginUrl / startWechatLogin（二维码会话 + 长轮询）/ completePhoneBind |
 | `McCloudSessionManager` | 登录态门面 | `isSignedIn` / `currentUser` / `clearSession` / 401 回调注册 |
@@ -117,6 +123,8 @@ graph TD
 | `mc_cloud_projects_page.dart` | 同上 | 项目与任务列表 |
 | `mc_cloud_task_detail_page.dart` | 同上 | 云端任务执行：创建表单（宿主/镜像/CLI/资源选项）、流式输出跟随、停止/删除、轮次回放、提问索引 |
 | `mc_cloud_task_files_sheet.dart` | 同上 | VM 工作区文件上传/下载、附件直传、进度与取消 |
+| Home 任务侧边栏 | `ui/lib/features/home/widgets/` | 展示云任务状态并打开 `agentRuntime=mccloud` 的会话目标 |
+| 共享聊天页 | `ui/lib/features/home/pages/chat/` | 通过 Agent runtime 加载云任务并复用正常消息、工具与状态 UI |
 | 路由注册 | `ui/lib/features/my/router_config.dart` | 新增上述路由 |
 
 ### 4. 与现有账户体系的关系
@@ -129,6 +137,8 @@ graph TD
 - **微信扫码登录（Phase 1，参考桌面版 `wechat.rs`）**：与手机号/支付宝/抖音同走百智云 Cookie 罐。流程：`GET /api/v1/user/oauth/login?platform=wechat&redirect_url={account}/` 取授权地址 → 从授权页 HTML 解析 `/connect/qrcode/<uuid>` → 拉取二维码图片（data URL 下发 Flutter 弹层展示）→ 以 `lp.<授权页域名>` 为基址长轮询 `wx_errcode`/`wx_code`（Service 同一时刻只保留最新一次扫码会话）→ 405 成功后请求百智云回调落 Cookie。取消/过期（403/402|500）关闭弹层。
 - **云端任务执行（Phase 3，参考桌面版 `cloudapi.ts`/`useCloudTask.ts`）**：任务详情页云端视图。创建任务前拉取任务选项（宿主/镜像/CLI/资源），`POST /api/v1/users/tasks` 提交后打开云端 WS（stream 管道）流式输出；拨号失败/断线按指数退避重连（封顶 30 秒），收到结束帧停止重连；control 管道下发停止；`PUT /api/v1/users/tasks/stop` 仅中断当前轮，`DELETE /api/v1/users/tasks/{id}` 删除任务；切换查看时按游标回放历史轮次与提问索引。
 - **云端任务文件（Phase 3，参考桌面版 `uploads.rs`）**：附件先经预签名地址直传对象存储，再把返回地址放入消息附件；VM 工作区文件 multipart 上传至 VM 绝对路径；下载流式落盘（目录由服务端打包 zip），支持取消并清理残件，进度经事件通道上报。
+- **云模型目录接线**：`MonkeyCodeCloudModelProjection.modelId` 进入 Provider 模型目录缓存；`fetchProviderModels` 对 `sourceType=monkeycode` 返回同步模型，避免请求 llmproxy `/models`。场景绑定和会话级模型覆盖均携带 `providerProfileId`，使 `HttpController` 能识别云路由并动态签名。
+- **云任务 ACP 适配**：任务 ID 作为 opaque `agentSessionId`，runtime 标识为 `mccloud`。adapter 将 REST rounds 和 WebSocket frame 规范化为 ACP `session/update`，并通过既有 `AgentRuntimeManager.emitEvent()` 发布，Flutter 侧不新增第二套 reducer。
 
 ### 5. 阶段划分
 
@@ -166,7 +176,7 @@ McCloudTaskRound { round, startAt, endAt, summary, events }
 McCloudTaskUserInput { round, question, answer, answeredAt }
 McCloudTaskFile { path, size, isDir, round? }
 McCloudWechatSession { uuid, state, callbackUrl, lpBase, qrDataUrl, errcode, wxCode }
-McCloudOhmyAgentKey { id, apiKey("omk-*"), signingSecret, server, baseUrl }
+McCloudOhmyAgentKey { id, apiKey("oma_*" or legacy "omk-*"), signingSecret, server, baseUrl }
 ```
 
 字段命名与后端 JSON（camelCase）一致；Kotlin 用 Gson 序列化，与现有 `AccountApiClient` 风格统一。
@@ -184,6 +194,8 @@ McCloudOhmyAgentKey { id, apiKey("omk-*"), signingSecret, server, baseUrl }
 9. **微信单会话**：`McCloudOAuthHandler` 同一时刻只保留最新一次微信扫码会话；弹层取消、过期（402|500）或成功（405）即清空会话，防状态串扰。
 10. **文件下载原子性**：下载中断或取消必须清理残件，不允许半文件留存；上传/下载取消后事件通道停止进度上报。
 11. **用量聚合容错**：我的页面用量（钱包/订阅/签到/邀请）四路并发拉取，部分失败以空占位展示，仅全失败才报错，不因单一路径失败阻塞整个面板。
+12. **云模型目录完整性**：每个可选云 profile 必须暴露且仅暴露一个确定的服务端模型名；locked profile 不得进入可选集合。
+13. **云任务身份隔离**：云任务事件必须携带稳定 `sessionId`、`turnId`、`messageId` 或 `toolCallId`，并由共享 coordinator 按任务会话隔离。
 
 ## Error Handling
 
@@ -203,6 +215,9 @@ McCloudOhmyAgentKey { id, apiKey("omk-*"), signingSecret, server, baseUrl }
 | 注销失败 | 展示错误并保留当前登录（仅服务端确认成功后才清除本地会话） |
 | Phase 2 代理返回 401/403 | 会话失效则清除会话回登录页；omk key 失效则重新领取；模型不可达展示上游错误 |
 | Phase 2 签名校验失败 | 检查 system_prompt 提取与 HMAC 计算一致性，提示"模型请求校验失败" |
+| 云模型目录为空 | 重新同步 MonkeyCode 模型目录并展示同步错误；保留本地 BYOK 模型目录 |
+| 云任务历史加载失败 | 保留已加载消息并展示重试入口 |
+| 云任务实时流中断 | 按 bounded backoff 重新 attach，使用序号去重回放帧 |
 
 ## Test Strategy
 
@@ -216,6 +231,9 @@ McCloudOhmyAgentKey { id, apiKey("omk-*"), signingSecret, server, baseUrl }
 | 微信登录 | 授权页 fixture + 长轮询脚本化 wx_errcode 序列（408→405/403/402） | JUnit + MockWebServer |
 | 文件管理 | 下载流写入与取消清理、上传进度 | JUnit + TempDir |
 | Flutter | 登录表单校验、签到按钮状态、邀请链接复制、任务流 UI 状态 | flutter_test |
+| 云模型目录 | 同步 projection 进入模型选择目录、locked 过滤、会话覆盖保留 Provider 身份 | JUnit + flutter_test |
+| 云任务 ACP | session list/load/prompt/cancel、rounds/frame 映射、任务间身份隔离 | JUnit |
+| 任务侧边栏 | 云任务分组、状态、点击路由、会话过期清理 | flutter_test |
 | 集成 | `assembleDevelopStandardDebug` 构建验证 | Gradle |
 
 ## References

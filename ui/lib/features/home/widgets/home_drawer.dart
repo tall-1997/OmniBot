@@ -20,6 +20,7 @@ import 'package:ui/models/scheduled_task.dart';
 import 'package:ui/services/assists_core_service.dart';
 import 'package:ui/services/conversation_history_service.dart';
 import 'package:ui/services/conversation_service.dart';
+import 'package:ui/services/mc_cloud_service.dart';
 import 'package:ui/services/omnibot_resource_service.dart';
 import 'package:ui/services/scheduled_task_storage_service.dart';
 import 'package:ui/services/storage_service.dart';
@@ -101,6 +102,8 @@ class HomeDrawer extends ConsumerStatefulWidget {
     this.onThreadTargetSelected,
     this.onSearchFocusChanged,
     this.searchFieldKey,
+    this.cloudTasksLoader,
+    this.cloudEvents,
   });
 
   final int? memoryCount;
@@ -110,6 +113,8 @@ class HomeDrawer extends ConsumerStatefulWidget {
   final ValueChanged<ConversationThreadTarget>? onThreadTargetSelected;
   final ValueChanged<bool>? onSearchFocusChanged;
   final GlobalKey? searchFieldKey;
+  final Future<McCloudPage<McCloudTask>> Function()? cloudTasksLoader;
+  final Stream<McCloudEvent>? cloudEvents;
 
   @override
   ConsumerState<HomeDrawer> createState() => HomeDrawerState();
@@ -163,6 +168,7 @@ class HomeDrawerState extends ConsumerState<HomeDrawer> {
   Timer? _searchDebounceTimer;
   String? _editingThreadKey;
   List<ScheduledTask> _scheduledTasks = <ScheduledTask>[];
+  List<McCloudTask> _cloudTasks = <McCloudTask>[];
   // 分组结果缓存：_allConversations/_scheduledTasks 只会被整体替换（不会原地
   // 修改），因此按列表 identity 判断是否需要重算，避免每次 build 重复
   // filter+sort（该 getter 一次 build 会被调用多次）。
@@ -175,6 +181,9 @@ class HomeDrawerState extends ConsumerState<HomeDrawer> {
   _conversationListChangedSubscription;
   StreamSubscription<bool>? _sidebarPolicyChangedSubscription;
   StreamSubscription<List<ScheduledTask>>? _scheduledTasksChangedSubscription;
+  StreamSubscription<McCloudEvent>? _cloudEventsSubscription;
+  int _cloudTaskLoadGeneration = 0;
+  bool _cloudSessionExpired = false;
 
   @override
   void initState() {
@@ -197,7 +206,10 @@ class HomeDrawerState extends ConsumerState<HomeDrawer> {
     _scheduledTasksChangedSubscription = ScheduledTaskStorageService
         .scheduledTasksChangedStream
         .listen(_handleScheduledTasksChanged);
+    _cloudEventsSubscription = (widget.cloudEvents ?? McCloudService.events)
+        .listen(_handleCloudEvent, onError: (_) {});
     _loadConversations();
+    _loadCloudTasks();
   }
 
   @override
@@ -206,6 +218,7 @@ class HomeDrawerState extends ConsumerState<HomeDrawer> {
     _conversationListChangedSubscription?.cancel();
     _sidebarPolicyChangedSubscription?.cancel();
     _scheduledTasksChangedSubscription?.cancel();
+    _cloudEventsSubscription?.cancel();
     if (_searchFocusNode.hasFocus) {
       widget.onSearchFocusChanged?.call(false);
     }
@@ -236,6 +249,7 @@ class HomeDrawerState extends ConsumerState<HomeDrawer> {
 
   void reloadConversations() {
     _loadConversations();
+    _loadCloudTasks();
   }
 
   void unfocusSearch() {

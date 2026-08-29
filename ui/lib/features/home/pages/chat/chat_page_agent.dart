@@ -550,19 +550,17 @@ mixin _ChatPageAgentMixin on _ChatPageStateBase {
     if (threadId.isEmpty) {
       return;
     }
-    final runtimeId = _remoteCodexRuntimeId(threadId);
-    _activeRemoteCodexRuntimeId = runtimeId;
     _activeAgentThreadId = threadId;
     _activeAgentTurnId = null;
-    _modeState(ChatPageMode.agent).currentConversationId = runtimeId;
 
     try {
       AgentRuntimeStatus status = _agentRuntimeStatus;
-      if (!status.connected) {
+      if (target.agentRuntime != 'mccloud' && !status.connected) {
         status = await AgentRuntimeService.connect();
       }
       final response = await AgentRuntimeService.loadSession(
         sessionId: threadId,
+        runtime: target.agentRuntime,
         conversationMode: ConversationMode.agent.storageValue,
       );
       if (!mounted) return;
@@ -570,6 +568,13 @@ mixin _ChatPageAgentMixin on _ChatPageStateBase {
           _asAgentString(response['threadId']) ??
           _asAgentString(_asAgentMap(response['thread'])?['id']) ??
           threadId;
+      final runtimeId = target.agentRuntime == 'mccloud'
+          ? _asAgentInt(response['conversationId'])
+          : (_asAgentInt(response['conversationId']) ??
+                _remoteCodexRuntimeId(threadId));
+      if (runtimeId == null) {
+        throw StateError('McCloud session 未返回 conversationId');
+      }
       final conversation = _remoteCodexConversationFromResponse(
         runtimeId: runtimeId,
         response: response,
@@ -1814,7 +1819,9 @@ mixin _ChatPageAgentMixin on _ChatPageStateBase {
     if (eventMode == ChatPageMode.agent &&
         isVisibleConversation &&
         (threadId != null || turnId != null)) {
-      _activeAgentThreadId = threadId ?? _activeAgentThreadId;
+      _activeAgentThreadId = threadId == null
+          ? _activeAgentThreadId
+          : _taskIdForVisibleAgentSession(threadId);
       _activeAgentTurnId = turnId ?? _activeAgentTurnId;
     }
     if (eventMode == ChatPageMode.agent && isVisibleConversation) {
@@ -1863,6 +1870,14 @@ mixin _ChatPageAgentMixin on _ChatPageStateBase {
     String? modelOverride,
     String? collaborationModeOverride,
   }) async {
+    if (_isMcCloudSessionTarget) {
+      await _sendMcCloudMessage(
+        aiMessageId,
+        messageText,
+        attachments: attachments,
+      );
+      return;
+    }
     // Prime the active turn before status probing, ACP connection, adapter
     // preparation, or conversation persistence. The chat list can therefore
     // show the selected Agent and an elapsed processing state immediately,
@@ -2036,6 +2051,54 @@ mixin _ChatPageAgentMixin on _ChatPageStateBase {
     }
   }
 
+  Future<void> _sendMcCloudMessage(
+    String aiMessageId,
+    String messageText, {
+    required List<Map<String, dynamic>> attachments,
+  }) async {
+    final conversationId = _currentConversationId;
+    final sessionId = _activeAgentThreadId?.trim() ?? '';
+    if (conversationId == null || sessionId.isEmpty) {
+      handleAgentError('McCloud session 尚未完成加载');
+      return;
+    }
+    _currentDispatchTurnId = aiMessageId;
+    _syncRuntimeSnapshotForMode(ChatPageMode.agent);
+    _runtimeCoordinator.registerTask(
+      taskId: aiMessageId,
+      conversationId: conversationId,
+      mode: kChatRuntimeModeAgent,
+    );
+    _runtimeCoordinator.beginAcpTurn(
+      taskId: aiMessageId,
+      conversationId: conversationId,
+      mode: kChatRuntimeModeAgent,
+    );
+    try {
+      final response = await AgentRuntimeService.promptSession(
+        sessionId: sessionId,
+        runtime: 'mccloud',
+        requestId: aiMessageId,
+        text: messageText,
+        attachments: attachments,
+      );
+      _activeAgentThreadId = _asAgentString(response['threadId']) == null
+          ? _activeAgentThreadId
+          : _taskIdForVisibleAgentSession(
+              _asAgentString(response['threadId'])!,
+            );
+      _activeAgentTurnId =
+          _asAgentString(response['turnId']) ?? _activeAgentTurnId;
+    } catch (error) {
+      if (mounted) {
+        handleAgentError(
+          'MonkeyCode Cloud 启动失败: ${formatAgentRuntimeErrorForUser(error)}',
+        );
+      }
+      _runtimeCoordinator.unregisterTask(aiMessageId);
+    }
+  }
+
   @override
   Future<void> _interruptAgentTurn() async {
     final conversationId = _modeState(ChatPageMode.agent).currentConversationId;
@@ -2044,13 +2107,24 @@ mixin _ChatPageAgentMixin on _ChatPageStateBase {
     }
     try {
       await AgentRuntimeService.cancelPrompt(
-        conversationId: _isRemoteCodexConfigured() ? null : conversationId,
+        conversationId: _isRemoteCodexConfigured() || _isMcCloudSessionTarget
+            ? null
+            : conversationId,
         sessionId: _activeAgentThreadId,
+        runtime: _isMcCloudSessionTarget ? 'mccloud' : null,
         promptId: _activeAgentTurnId,
       );
     } catch (error) {
       debugPrint('Agent interrupt failed: $error');
     }
+  }
+
+  String _taskIdForVisibleAgentSession(String sessionId) {
+    final normalized = sessionId.trim();
+    if (_isMcCloudSessionTarget && normalized.startsWith('mccloud:')) {
+      return normalized.substring('mccloud:'.length);
+    }
+    return normalized;
   }
 
   Future<String?> _resolveAgentRequestModel(
@@ -2396,6 +2470,11 @@ mixin _ChatPageAgentMixin on _ChatPageStateBase {
       initialMessages: messages,
       conversation: conversation,
       initialChatIslandDisplayLayer: ChatIslandDisplayLayer.mode,
+    );
+    _runtimeCoordinator.bindLoadedAcpSession(
+      conversationId: runtimeId,
+      mode: kChatRuntimeModeAgent,
+      sessionId: resolvedThreadId,
     );
     _runtimeCoordinator.replaceConversationSnapshot(
       conversationId: runtimeId,

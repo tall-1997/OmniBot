@@ -1,8 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -17,6 +17,7 @@ import 'package:ui/models/conversation_thread_target.dart';
 import 'package:ui/models/habitual_hand.dart';
 import 'package:ui/services/scheduled_task_storage_service.dart';
 import 'package:ui/services/storage_service.dart';
+import 'package:ui/services/mc_cloud_service.dart';
 
 class _SvgTestAssetBundle extends CachingAssetBundle {
   static final Uint8List _svgBytes = Uint8List.fromList(
@@ -42,7 +43,12 @@ void main() {
   const assistCoreChannel = MethodChannel(
     'cn.com.omnimind.bot/AssistCoreEvent',
   );
+  const cloudChannel = MethodChannel('cn.com.omnimind.bot/McCloudAccount');
+  const cloudEventsChannel = MethodChannel(
+    'cn.com.omnimind.bot/McCloudAccountEvents',
+  );
   late List<Map<String, Object?>> nativeConversations;
+  late List<Map<String, Object?>> cloudTasks;
 
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -50,6 +56,7 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     await StorageService.init();
     nativeConversations = <Map<String, Object?>>[];
+    cloudTasks = <Map<String, Object?>>[];
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(assistCoreChannel, (call) async {
           switch (call.method) {
@@ -65,11 +72,143 @@ void main() {
               return null;
           }
         });
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(cloudChannel, (call) async {
+          if (call.method == 'listTasks') {
+            return <String, Object?>{
+              'tasks': cloudTasks,
+              'page_info': <String, Object?>{'has_next_page': false},
+            };
+          }
+          return null;
+        });
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(cloudEventsChannel, (_) async => null);
   });
 
   tearDown(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(assistCoreChannel, null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(cloudChannel, null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(cloudEventsChannel, null);
+  });
+
+  testWidgets('shows cloud task groups and opens mccloud session target', (
+    tester,
+  ) async {
+    ConversationThreadTarget? selectedTarget;
+    cloudTasks = <Map<String, Object?>>[
+      <String, Object?>{
+        'id': 'task-running',
+        'title': '正在修复登录',
+        'status': 'running',
+      },
+      <String, Object?>{
+        'id': 'task-completed',
+        'title': '已完成发布',
+        'status': 'completed',
+      },
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DefaultAssetBundle(
+          bundle: _SvgTestAssetBundle(),
+          child: _buildProviderScope(
+            child: Scaffold(
+              body: SizedBox(
+                width: 360,
+                height: 720,
+                child: HomeDrawer(
+                  embedded: true,
+                  closeOnNavigate: false,
+                  onThreadTargetSelected: (target) => selectedTarget = target,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('云进行中'), findsOneWidget);
+    expect(find.text('云历史任务'), findsOneWidget);
+    expect(find.text('正在修复登录'), findsOneWidget);
+    expect(find.text('已完成发布'), findsOneWidget);
+
+    await tester.tap(
+      find.byKey(const ValueKey('home-drawer-cloud-task-task-running')),
+    );
+    await tester.pump();
+
+    expect(selectedTarget?.agentSessionId, 'task-running');
+    expect(selectedTarget?.agentRuntime, 'mccloud');
+    expect(selectedTarget?.agentSessionActive, isTrue);
+    expect(selectedTarget?.mode, ConversationMode.agent);
+  });
+
+  testWidgets('cloud events clear expired tasks and refresh ended tasks', (
+    tester,
+  ) async {
+    final events = StreamController<McCloudEvent>();
+    addTearDown(events.close);
+    var loadCount = 0;
+    var tasks = <McCloudTask>[
+      const McCloudTask(id: 'task-running', title: '云任务', status: 'running'),
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DefaultAssetBundle(
+          bundle: _SvgTestAssetBundle(),
+          child: _buildProviderScope(
+            child: Scaffold(
+              body: SizedBox(
+                width: 360,
+                height: 720,
+                child: HomeDrawer(
+                  embedded: true,
+                  cloudEvents: events.stream,
+                  cloudTasksLoader: () async {
+                    loadCount++;
+                    return McCloudPage<McCloudTask>(tasks);
+                  },
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('云任务'), findsOneWidget);
+
+    tasks = <McCloudTask>[
+      const McCloudTask(
+        id: 'task-running',
+        title: '已刷新云任务',
+        status: 'completed',
+      ),
+    ];
+    events.add(
+      const McTaskStreamEvent(
+        'taskClosed',
+        taskId: 'task-running',
+        payload: <String, Object?>{},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(loadCount, 2);
+    expect(find.text('已刷新云任务'), findsOneWidget);
+    expect(find.text('云历史任务'), findsOneWidget);
+
+    events.add(const McSessionExpiredEvent());
+    await tester.pumpAndSettle();
+    expect(find.text('已刷新云任务'), findsNothing);
   });
 
   testWidgets('embedded mode routes new conversation through callback', (
@@ -371,7 +510,9 @@ void main() {
         matching: find.byType(ConversationSlidable),
       ),
     );
-    expect(scheduledChildSlidable.actions, hasLength(2));
+    // Scheduled children suppress pinning while retaining delete, copy, and
+    // archive, matching regular conversation actions.
+    expect(scheduledChildSlidable.actions, hasLength(3));
   });
 
   testWidgets('unfocuses search field when tapping outside', (tester) async {

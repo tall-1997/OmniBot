@@ -270,6 +270,46 @@ extension _HomeDrawerSearch on HomeDrawerState {
     }
   }
 
+  Future<void> _loadCloudTasks() async {
+    final generation = ++_cloudTaskLoadGeneration;
+    try {
+      final page =
+          await (widget.cloudTasksLoader?.call() ??
+              McCloudService.listTasks(size: 50));
+      if (!mounted || generation != _cloudTaskLoadGeneration) return;
+      setState(() {
+        _cloudSessionExpired = false;
+        _cloudTasks = page.items;
+      });
+    } catch (error) {
+      debugPrint('[HomeDrawer] Failed to load cloud tasks: $error');
+    }
+  }
+
+  void _handleCloudEvent(McCloudEvent event) {
+    if (!mounted) return;
+    if (event is McSessionExpiredEvent) {
+      _cloudTaskLoadGeneration++;
+      setState(() {
+        _cloudSessionExpired = true;
+        _cloudTasks = <McCloudTask>[];
+      });
+      return;
+    }
+    if (_cloudSessionExpired || event is! McTaskStreamEvent) return;
+    final type = event.type.trim().toLowerCase();
+    final data = event.payload['data']?.toString().toLowerCase() ?? '';
+    final taskEnded =
+        type == 'taskclosed' ||
+        type == 'taskended' ||
+        type == 'taskfailed' ||
+        (type == 'taskmessage' &&
+            (data.contains('task-ended') || data.contains('task-error')));
+    if (taskEnded) {
+      unawaited(_loadCloudTasks());
+    }
+  }
+
   void _handleSearchFocusChanged() {
     widget.onSearchFocusChanged?.call(_searchFocusNode.hasFocus);
   }

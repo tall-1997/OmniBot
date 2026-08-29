@@ -7,6 +7,8 @@ const String _kExpandedConversationSectionsStorageKey =
 const String _kPinnedConversationSectionKey = '__home_drawer_pinned__';
 const String _kScheduledConversationSectionKey = '__home_drawer_scheduled__';
 const String _kChatOnlyConversationSectionKey = '__home_drawer_chat_only__';
+const String _kCloudActiveTaskSectionKey = '__home_drawer_cloud_active__';
+const String _kCloudHistoryTaskSectionKey = '__home_drawer_cloud_history__';
 const String _kOmniAiDateSectionNamespace = 'omni_ai';
 const String _kChatOnlyDateSectionNamespace = 'chat_only';
 const String _kChatOnlySectionIconAssetPath = 'assets/home/chat/pure_chat.svg';
@@ -204,6 +206,30 @@ extension _HomeDrawerConversationList on HomeDrawerState {
 
     final scheduledGroups = _scheduledConversationGroups;
     final pinnedResults = _pinnedConversationResults;
+    final activeCloudTasks = _cloudTasks
+        .where((task) => _isCloudTaskActive(task.status))
+        .toList(growable: false);
+    final historyCloudTasks = _cloudTasks
+        .where((task) => !_isCloudTaskActive(task.status))
+        .toList(growable: false);
+    if (activeCloudTasks.isNotEmpty) {
+      addSection(
+        _buildCloudTaskSection(
+          sectionKey: _kCloudActiveTaskSectionKey,
+          label: '云进行中',
+          tasks: activeCloudTasks,
+        ),
+      );
+    }
+    if (historyCloudTasks.isNotEmpty) {
+      addSection(
+        _buildCloudTaskSection(
+          sectionKey: _kCloudHistoryTaskSectionKey,
+          label: '云历史任务',
+          tasks: historyCloudTasks,
+        ),
+      );
+    }
     if (scheduledGroups.isNotEmpty) {
       addSection(_buildScheduledConversationSection(scheduledGroups));
     }
@@ -276,6 +302,118 @@ extension _HomeDrawerConversationList on HomeDrawerState {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  bool _isCloudTaskActive(String status) {
+    return const <String>{
+      'created',
+      'pending',
+      'queued',
+      'starting',
+      'running',
+      'processing',
+      'in_progress',
+      'waiting',
+      'waiting_input',
+      'need_input',
+    }.contains(status.trim().toLowerCase());
+  }
+
+  Widget _buildCloudTaskSection({
+    required String sectionKey,
+    required String label,
+    required List<McCloudTask> tasks,
+  }) {
+    final expanded = _isConversationSectionExpanded(sectionKey);
+    return Column(
+      children: [
+        _buildConversationSectionHeader(
+          label,
+          expanded: expanded,
+          itemCount: tasks.length,
+          onTap: () => _toggleConversationSection(sectionKey),
+          leading: Icon(
+            Icons.cloud_outlined,
+            size: 14,
+            color: context.omniPalette.textTertiary,
+          ),
+          leadingSlotWidth: _kConversationSectionHeaderLeadingSlotWidth,
+        ),
+        _buildCollapsibleSectionBody(
+          expanded: expanded,
+          child: Padding(
+            padding: const EdgeInsets.only(
+              left: _kModeSectionTimelineLeadingInset,
+            ),
+            child: Column(
+              children: [
+                const SizedBox(height: 2),
+                for (final task in tasks) _buildCloudTaskItem(task),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCloudTaskItem(McCloudTask task) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        key: ValueKey('home-drawer-cloud-task-${task.id}'),
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => _openThreadTarget(
+          ConversationThreadTarget.agentSession(
+            sessionId: task.id,
+            runtime: 'mccloud',
+            agentSessionActive: _isCloudTaskActive(task.status),
+            requestKey: DateTime.now().microsecondsSinceEpoch.toString(),
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+          child: Row(
+            children: [
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: _isCloudTaskActive(task.status)
+                      ? context.omniPalette.accentPrimary
+                      : context.omniPalette.textTertiary,
+                ),
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      task.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 14, color: _drawerTextColor),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      task.status,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: _drawerSecondaryTextColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -916,6 +1054,7 @@ extension _HomeDrawerConversationList on HomeDrawerState {
     required int itemCount,
     required VoidCallback onTap,
     String? iconAssetPath,
+    Widget? leading,
     Key? iconKey,
     double leadingSlotWidth = 0,
   }) {
@@ -935,21 +1074,23 @@ extension _HomeDrawerConversationList on HomeDrawerState {
               SizedBox(
                 width: leadingSlotWidth,
                 height: 14,
-                child: iconAssetPath == null
-                    ? null
-                    : Align(
-                        alignment: Alignment.centerLeft,
-                        child: SvgPicture.asset(
-                          iconAssetPath,
-                          key: iconKey,
-                          width: 14,
-                          height: 14,
-                          colorFilter: ColorFilter.mode(
-                            palette.textTertiary,
-                            BlendMode.srcIn,
-                          ),
-                        ),
-                      ),
+                child:
+                    leading ??
+                    (iconAssetPath == null
+                        ? null
+                        : Align(
+                            alignment: Alignment.centerLeft,
+                            child: SvgPicture.asset(
+                              iconAssetPath,
+                              key: iconKey,
+                              width: 14,
+                              height: 14,
+                              colorFilter: ColorFilter.mode(
+                                palette.textTertiary,
+                                BlendMode.srcIn,
+                              ),
+                            ),
+                          )),
               ),
             Text(
               label,

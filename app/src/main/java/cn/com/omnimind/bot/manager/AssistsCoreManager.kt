@@ -23,6 +23,7 @@ import cn.com.omnimind.baselib.llm.AiRequestLogStore
 import cn.com.omnimind.baselib.llm.DeepSeekProvider
 import cn.com.omnimind.baselib.llm.ModelProviderConfig
 import cn.com.omnimind.baselib.llm.ModelProviderProfile
+import cn.com.omnimind.baselib.llm.MonkeyCodeCloudProvider
 import cn.com.omnimind.baselib.llm.ModelProviderConfigStore
 import cn.com.omnimind.baselib.llm.ModelSceneRegistry
 import cn.com.omnimind.baselib.llm.ProviderModelOption
@@ -128,7 +129,7 @@ internal fun resolveDirectAgentModelOverride(
         return null
     }
     val providerProfile = profileLookup(providerProfileId)
-    if (providerProfile == null || !providerProfile.isConfigured()) {
+    if (providerProfile == null || !providerProfile.isConfigured() || !providerProfile.ready) {
         return null
     }
     val contextLimit = when (val rawContextLimit = raw["contextLimit"]) {
@@ -140,6 +141,14 @@ internal fun resolveDirectAgentModelOverride(
         modelId = modelId,
         contextLimit = contextLimit,
     )
+}
+
+internal fun resolveSynchronizedProviderModels(
+    profile: ModelProviderProfile,
+): List<ProviderModelOption>? = if (MonkeyCodeCloudProvider.isCloudSource(profile.sourceType)) {
+    MonkeyCodeCloudProvider.inventoryModels(profile)
+} else {
+    null
 }
 
 internal fun normalizeReasoningEffort(raw: String?): String? {
@@ -1642,6 +1651,12 @@ class AssistsCoreManager(private val context: Context) {
                             expectedProfileBaseUrl
                         )
                 ) { "provider profile changed" }
+                resolveSynchronizedProviderModels(profile)?.let { models ->
+                    withContext(Dispatchers.Main) {
+                        result.success(models.map { it.toMap() })
+                    }
+                    return@launch
+                }
                 val apiBase = if (baseUrlArg.isNotEmpty()) baseUrlArg else profile.baseUrl
                 val apiKey = if (useProvidedApiKey) apiKeyArg else profile.apiKey
                 val customHeaders = if (useProvidedCustomHeaders) customHeadersArg else profile.customHeaders

@@ -29,10 +29,17 @@ extension _HomeDrawerActions on HomeDrawerState {
     ConversationThreadTarget target,
   ) {
     return <String, dynamic>{
-      'conversationId': target.conversationId?.toString() ?? 'new',
+      if (target.agentSessionId?.trim().isNotEmpty != true)
+        'conversationId': target.conversationId?.toString() ?? 'new',
       'mode': target.mode.storageValue,
       if (target.agentId?.trim().isNotEmpty == true)
         'agentId': target.agentId!.trim(),
+      if (target.agentSessionId?.trim().isNotEmpty == true)
+        'agentSessionId': target.agentSessionId!.trim(),
+      if (target.agentRuntime?.trim().isNotEmpty == true)
+        'agentRuntime': target.agentRuntime!.trim(),
+      if (target.agentSessionActive != null)
+        'agentSessionActive': target.agentSessionActive.toString(),
       'requestKey':
           target.requestKey ?? DateTime.now().microsecondsSinceEpoch.toString(),
     };

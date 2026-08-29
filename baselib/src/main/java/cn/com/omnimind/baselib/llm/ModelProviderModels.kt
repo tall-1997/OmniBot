@@ -31,6 +31,7 @@ data class ModelProviderProfile(
     val protocolType: String = "openai_compatible",
     val wireApi: String = OpenAiWireApi.CHAT_COMPLETIONS,
     val revision: Long = 0L,
+    val modelIds: List<String> = emptyList(),
 ) {
     fun isConfigured(): Boolean = baseUrl.isNotBlank()
 }

@@ -20,6 +20,8 @@
 - [x] 2.3 Implement OhMyAgent prompt extraction and HMAC signing
 - [x] 2.4 Add MonkeyCode cloud provider routing to AgentLlmClient
 - [ ] 2.5 Verify SSE streaming, one-time key renewal, logout revocation, and BYOK isolation
+- [x] 2.6 Connect synchronized MonkeyCode model inventory to the existing model selector
+- [x] 2.7 Preserve MonkeyCode provider identity for scene bindings and conversation model overrides
 
 ## Phase 3: Cloud Task Execution
 
@@ -28,6 +30,9 @@
 - [x] 3.3 Implement attachment presign upload and VM workspace upload/download
 - [x] 3.4 Add Flutter cloud task execution and file-management UI
 - [ ] 3.5 Verify task lifecycle, stream recovery, progress events, and partial-file cleanup
+- [x] 3.6 Add a McCloud ACP session adapter for task list, load, prompt, cancel, and updates
+- [x] 3.7 Show cloud tasks in the Home task sidebar and open them in the shared chat page
+- [x] 3.8 Map task rounds and live frames into the existing AgentEventReducer identity model
 
 ## Final Verification
 
@@ -50,5 +55,8 @@
 - 2026-08-28: Cloud model HTTP and SSE requests now renew an expired omk credential once on 401/403 and replay with a regenerated signature; focused `HttpControllerMonkeyCodeCloudTest` and `:assists:compileDebugKotlin` passed.
 - 2026-08-28: The active `HttpController` model route no longer resolves or forwards the retired omni-account platform gateway.
 - 2026-08-28: Incremental Android assembly after the credential-renewal change completed successfully in 5m 44s; the final APK is 182,234,533 bytes with SHA-256 `330d9e71ab335ba16500dfd7f7045f017fdf077e9bdc39b013dda613df75641e`.
+- 2026-08-29: Synchronized cloud model inventories now feed the existing Provider selector directly; current `oma_*` and legacy `omk-*` proxy keys are accepted, and scene/conversation overrides preserve cloud routing and dynamic signatures.
+- 2026-08-29: Cloud tasks now appear in the Home task sidebar and open as `mccloud` ACP sessions in the shared chat page; rounds and live `new`/`attach` streams use the existing reducer and coordinator.
+- 2026-08-29: Focused Kotlin verification passed for cloud model inventory, proxy signing, stream modes, and McCloud ACP session mapping; 128 focused Flutter model, drawer, routing, session, and coordinator tests passed.
 - The full 21-requirement end-to-end acceptance remains open.
 - Douyin authorization remains blocked on an OmniBot-bound ClientKey and signing configuration.

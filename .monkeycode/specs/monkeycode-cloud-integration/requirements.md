@@ -246,7 +246,7 @@ MonkeyCode 云替换现有 `omni-account` 账号与 platform 官方模型网关�
 
 #### Acceptance Criteria
 
-1. WHEN 用户首次使用云模型聊天，系统 SHALL 调用 `POST /api/v1/users/ohmyagent/api-keys` 领取代理凭据 `{id, api_key("omk-*"), signing_secret}` 并加密存储。
+1. WHEN 用户首次使用云模型聊天，系统 SHALL 调用 `POST /api/v1/users/ohmyagent/api-keys` 领取代理凭据 `{id, api_key, signing_secret}` 并加密存储；`api_key` SHALL 兼容服务端当前 `oma_*` 与历史 `omk-*` 形式。
 2. WHEN 同步模型清单，系统 SHALL 调用 `GET /api/v1/users/models?limit=200` 并按档位标记锁定（`locked`）与隐藏（`is_hidden` 跳过）。
 3. WHEN 用户发起聊天，系统 SHALL 以 OpenAI 兼容协议请求后端 llmproxy 端点 `{server}/v1/chat/completions|responses|messages`，`Bearer/X-Api-Key` 携带 omk key，请求头携带 `X-OhMyAgent-Signature: v1=<hex(HMAC-SHA256(signing_secret, system_prompt))>`，请求体 `model` 字段传服务端模型名。
 4. WHEN 模型超档（locked），系统 SHALL 禁止选择并在 UI 置灰。
@@ -254,6 +254,24 @@ MonkeyCode 云替换现有 `omni-account` 账号与 platform 官方模型网关�
 6. WHEN 服务端返回 401/403 且 omk key 失效，系统 SHALL 重新领取并重试一次；会话失效则清除会话回登录页。
 7. WHEN 聊天输出为流式，系统 SHALL 透传 SSE 增量直至结束。
 8. WHEN 客户端请求涉及第三方模型 `api_key`，系统 SHALL 保证不接收、不存储、不落日志。
+9. WHILE 用户已登录 MonkeyCode 云，系统 SHALL 在现有模型选择器中展示同步得到的可用云模型，并保留服务端模型名、协议、归属和锁定状态。
+10. WHEN 云模型目录同步完成，系统 SHALL 直接使用同步清单作为模型选择目录，避免依赖 llmproxy 的模型发现接口。
+11. WHEN 用户选择云模型发起本地会话，系统 SHALL 在会话级模型覆盖与场景绑定两种路径中保留云 Provider 身份并执行代理签名。
+
+### Requirement 22: 云端任务统一会话
+
+**User Story:** AS 用户, I want 在任务侧边栏打开 MonkeyCode 云端任务并继续对话, so that 云端任务与本地会话具有一致的浏览和交互体验。
+
+#### Acceptance Criteria
+
+1. WHILE 用户已登录 MonkeyCode 云，系统 SHALL 在 Home 任务侧边栏展示云端进行中任务、项目任务与历史任务。
+2. WHEN 用户点击云端任务，系统 SHALL 以 `mccloud` runtime 和云任务 ID 打开现有聊天页面。
+3. WHEN 聊天页面加载云端任务，系统 SHALL 通过共享 ACP `session/load` 边界回放云端任务轮次，并将云端帧映射为标准 `session/update` 事件。
+4. WHILE 云端任务处于 `processing` 状态，系统 SHALL 通过 attach stream 接收当前轮回放与实时更新，并交由 `AgentEventReducer` 投影到正常对话 UI。
+5. WHEN 用户在云端任务会话发送消息，系统 SHALL 通过 `session/prompt` 开启新一轮云端任务流并回显用户消息与 Agent 增量输出。
+6. WHEN 用户取消云端任务当前轮，系统 SHALL 通过 `session/cancel` 中断当前轮并保持任务会话可继续加载。
+7. WHEN 云端任务结束，系统 SHALL 以只读会话展示完整历史，并支持按游标加载更早轮次。
+8. WHEN MonkeyCode 会话过期，系统 SHALL 清除侧边栏云任务并引导用户重新登录，同时保留本地会话与本地 BYOK 数据。
 
 ## Non-Functional Requirements
 
@@ -261,6 +279,7 @@ MonkeyCode 云替换现有 `omni-account` 账号与 platform 官方模型网关�
 2. **兼容**：MonkeyCode 云替换 omni-account 登录与 platform 官方渠道；迁移不得改写本地 BYOK 提供商、Key、场景选择或本地 Agent 数据。
 3. **平台**：支持 Android（min SDK 29）；支付宝/抖音通过各自 App 唤起与回调完成授权。
 4. **可配置**：云端服务地址可通过构建属性覆盖，便于切换环境。
+5. **统一会话边界**：云端任务通过共享 ACP session 接口进入聊天页，事件归约与会话协调复用现有实现。
 
 ## Registered Follow-ups
 

@@ -12,4 +12,13 @@ class McCloudTransfersTest {
         assertEquals(30_000L, taskReconnectDelayMillis(5))
         assertEquals(30_000L, taskReconnectDelayMillis(100))
     }
+
+    @Test
+    fun streamModesUseBackendNewAndAttachVocabulary() {
+        assertEquals("new", normalizeTaskStreamMode("new"))
+        assertEquals("attach", normalizeTaskStreamMode("attach"))
+        assertEquals("attach", normalizeTaskStreamMode("stream"))
+        assertEquals("attach", taskStreamReconnectMode("new"))
+        assertEquals("attach", taskStreamReconnectMode("attach"))
+    }
 }

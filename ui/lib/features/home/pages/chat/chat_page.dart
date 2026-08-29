@@ -742,6 +742,10 @@ abstract class _ChatPageStateBase extends State<ChatPage>
     unawaited(_applyConversationThreadTarget(target));
   }
 
+  bool get _isMcCloudSessionTarget =>
+      _resolvedThreadTarget?.agentRuntime == 'mccloud' &&
+      _resolvedThreadTarget?.isAgentSessionTarget == true;
+
   void _toggleHdPadLeftPaneCollapsed() {
     _dismissChatInputFocus();
     setState(() {
@@ -771,11 +775,17 @@ abstract class _ChatPageStateBase extends State<ChatPage>
     if (_activeMode == ChatPageMode.agent &&
         _isRemoteCodexRuntimeActiveForMode(ChatPageMode.agent)) {
       final threadId = _activeAgentThreadId?.trim() ?? '';
+      final resolvedTarget = _resolvedThreadTarget;
       if (threadId.isNotEmpty) {
         return ConversationThreadTarget.agentSession(
           sessionId: threadId,
-          runtime: 'remote',
-          agentId: _kRemoteCodexModeAgentId,
+          runtime: resolvedTarget?.agentRuntime ?? 'remote',
+          agentId:
+              resolvedTarget?.agentId ??
+              (resolvedTarget?.agentRuntime == 'mccloud'
+                  ? 'mccloud'
+                  : _kRemoteCodexModeAgentId),
+          agentSessionActive: resolvedTarget?.agentSessionActive,
         );
       }
       return ConversationThreadTarget.newConversation(
@@ -1568,7 +1578,9 @@ abstract class _ChatPageStateBase extends State<ChatPage>
     if (mounted) {
       setState(() {});
     }
-    unawaited(saveConversation());
+    if (!_isMcCloudSessionTarget) {
+      unawaited(saveConversation());
+    }
   }
 
   void interruptActiveToolCard({String? summary}) {

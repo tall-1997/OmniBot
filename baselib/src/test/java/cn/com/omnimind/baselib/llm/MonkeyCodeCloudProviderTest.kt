@@ -8,6 +8,19 @@ import org.junit.Test
 
 class MonkeyCodeCloudProviderTest {
     @Test
+    fun acceptsCurrentAndLegacyCloudProxyKeyFormats() {
+        listOf("oma_current_key", "omk-legacy-key").forEach { apiKey ->
+            val credential = MonkeyCodeCloudCredential(
+                keyId = "key-id",
+                apiKey = apiKey,
+                signingSecret = "omas_test_secret",
+            )
+
+            assertEquals(apiKey, credential.apiKey)
+        }
+    }
+
+    @Test
     fun extractsPromptUsingServerPriorityAcrossSupportedProtocols() {
         assertEquals(
             "anthropic-system",
@@ -114,8 +127,68 @@ class MonkeyCodeCloudProviderTest {
 
         assertEquals(1, projected.size)
         assertEquals("monkeycode-pro-coder", projected.single().modelId)
+        assertEquals(listOf("monkeycode-pro-coder"), projected.single().profile.modelIds)
         assertTrue(projected.single().locked)
         assertFalse(projected.single().profile.ready)
+        assertTrue(MonkeyCodeCloudProvider.inventoryModels(projected.single().profile).isEmpty())
+    }
+
+    @Test
+    fun exposesUnlockedProjectionThroughProviderInventory() {
+        val projection = MonkeyCodeCloudProvider.projectModels(
+            models = listOf(
+                MonkeyCodeCloudModelDescriptor(
+                    id = "public-1",
+                    model = "claude-sonnet-cloud",
+                    displayName = "Claude Sonnet",
+                    interfaceType = "anthropic",
+                    ownerType = "public",
+                ),
+            ),
+            proxyBaseUrl = MonkeyCodeCloudProvider.DEFAULT_PROXY_BASE_URL,
+        ).single()
+
+        assertEquals(
+            listOf(ProviderModelOption("claude-sonnet-cloud", "Claude Sonnet", "monkeycode")),
+            MonkeyCodeCloudProvider.inventoryModels(projection.profile),
+        )
+        assertEquals(
+            projection.profile,
+            MonkeyCodeCloudProvider.findOverrideProfile(
+                profiles = listOf(projection.profile),
+                apiBase = "https://proxy.monkeycode-ai.com/v1",
+                modelId = " claude-sonnet-cloud ",
+            ),
+        )
+        assertEquals(
+            null,
+            MonkeyCodeCloudProvider.findOverrideProfile(
+                profiles = listOf(projection.profile),
+                apiBase = "https://other.example/v1",
+                modelId = "claude-sonnet-cloud",
+            ),
+        )
+    }
+
+    @Test
+    fun advancesInventoryRevisionWhenCloudAvailabilityChanges() {
+        val unlocked = MonkeyCodeCloudProvider.profile(
+            id = "monkeycode-public-1",
+            name = "Cloud model",
+            proxyBaseUrl = MonkeyCodeCloudProvider.DEFAULT_PROXY_BASE_URL,
+            interfaceType = "openai_chat",
+        ).copy(modelIds = listOf("cloud-model"))
+        val firstSync = MonkeyCodeCloudProvider.synchronizeProfile(unlocked, null)
+        val unchanged = MonkeyCodeCloudProvider.synchronizeProfile(unlocked, firstSync)
+        val locked = MonkeyCodeCloudProvider.synchronizeProfile(
+            unlocked.copy(ready = false, statusText = "当前会员档位不可用"),
+            unchanged,
+        )
+
+        assertEquals(1L, firstSync.revision)
+        assertEquals(firstSync.revision, unchanged.revision)
+        assertEquals(2L, locked.revision)
+        assertTrue(MonkeyCodeCloudProvider.inventoryModels(locked).isEmpty())
     }
 
     @Test

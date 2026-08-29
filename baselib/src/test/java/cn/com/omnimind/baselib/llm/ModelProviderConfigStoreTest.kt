@@ -7,6 +7,26 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ModelProviderConfigStoreTest {
+    @Test
+    fun `provider model inventory survives metadata serialization`() {
+        val encoded = ModelProviderConfigStore.encodeProfilesMetadataJson(
+            listOf(
+                ModelProviderProfile(
+                    id = "monkeycode-model-1",
+                    name = "Cloud model",
+                    baseUrl = MonkeyCodeCloudProvider.DEFAULT_PROXY_BASE_URL,
+                    sourceType = MonkeyCodeCloudProvider.SOURCE_TYPE,
+                    modelIds = listOf(" cloud-model ", "cloud-model", ""),
+                ),
+            ),
+        )
+
+        assertEquals(
+            listOf("cloud-model"),
+            ModelProviderConfigStore.decodeProfilesJson(encoded).single().modelIds,
+        )
+    }
+
 
     @Test
     fun normalizeBaseUrl_preservesCompatibleModeVersionBase() {

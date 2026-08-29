@@ -322,6 +322,23 @@ void main() {
     expect(restored.agentSessionActive, isTrue);
   });
 
+  test('only session targets without conversation ids are standalone', () {
+    const standalone = ConversationThreadTarget.agentSession(
+      sessionId: 'mccloud:task-1',
+      runtime: 'mccloud',
+    );
+    const local = ConversationThreadTarget.existing(
+      conversationId: 42,
+      mode: ConversationMode.agent,
+      agentSessionId: 'local-session',
+      agentRuntime: 'local',
+    );
+
+    expect(standalone.isStandaloneAgentSessionTarget, isTrue);
+    expect(local.isAgentSessionTarget, isTrue);
+    expect(local.isStandaloneAgentSessionTarget, isFalse);
+  });
+
   test('round-trips local agent conversation target thread metadata', () async {
     const target = ConversationThreadTarget.existing(
       conversationId: 42,

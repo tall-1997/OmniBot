@@ -6,6 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ui/constants/storage_keys.dart';
 import 'package:ui/core/router/go_router_config.dart';
 import 'package:ui/core/router/go_router_manager.dart';
+import 'package:ui/features/home/router_config.dart';
+import 'package:ui/models/conversation_model.dart';
 import 'package:ui/services/storage_service.dart';
 
 void main() {
@@ -37,6 +39,21 @@ void main() {
     expect(routeNames, isNot(contains('home/first_use_tutorial')));
     expect(routeNames, isNot(contains('home/first_use_tutorial/features')));
     expect(routeNames, isNot(contains('home/first_use_tutorial/plugins')));
+  });
+
+  test('chat route restores mccloud session metadata from query', () {
+    final target = parseChatThreadTargetUri(
+      Uri.parse(
+        '/home/chat?mode=agent&agentSessionId=task-42&agentRuntime=mccloud&agentSessionActive=true&requestKey=open-1',
+      ),
+    );
+
+    expect(target?.mode, ConversationMode.agent);
+    expect(target?.agentSessionId, 'task-42');
+    expect(target?.agentRuntime, 'mccloud');
+    expect(target?.agentSessionActive, isTrue);
+    expect(target?.requestKey, 'open-1');
+    expect(target?.fromNativeRoute, isTrue);
   });
 
   testWidgets('fresh launch starts in the first-use tutorial', (tester) async {

@@ -10,6 +10,7 @@ import cn.com.omnimind.baselib.account.OmniAccount
 import cn.com.omnimind.baselib.database.DatabaseHelper
 import cn.com.omnimind.baselib.llm.ModelProviderProfile
 import cn.com.omnimind.baselib.llm.ModelProviderConfigStore
+import cn.com.omnimind.baselib.llm.MonkeyCodeCloudProvider
 import cn.com.omnimind.baselib.llm.OmniOfficialProvider
 import cn.com.omnimind.baselib.llm.OpenAiWireApi
 import cn.com.omnimind.baselib.llm.PlatformAiProvisioner
@@ -39,6 +40,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
@@ -124,6 +127,8 @@ internal suspend fun fetchAgentProviderModels(
 ): List<ProviderModelOption> {
     return if (OmniOfficialProvider.isOfficialProfile(profile.id)) {
         PlatformAiProvisioner.ensureReadyAndGetModels()
+    } else if (MonkeyCodeCloudProvider.isCloudSource(profile.sourceType)) {
+        MonkeyCodeCloudProvider.inventoryModels(profile)
     } else {
         HttpController.fetchProviderModels(
             apiBase = profile.baseUrl,
@@ -196,6 +201,9 @@ class AgentRuntimeManager private constructor(
         },
         onMessage = ::handleServerMessage
     )
+    private val mcCloudAcpSessionAdapter by lazy {
+        McCloudAcpSessionAdapter(publish = ::emitEvent)
+    }
     private val activeTurnsByThreadId = ConcurrentHashMap<String, String>()
     private val pendingTurnThreads = ConcurrentHashMap.newKeySet<String>()
     private val promptRequestTurns = ConcurrentHashMap<String, Pair<String, String>>()
@@ -529,6 +537,14 @@ class AgentRuntimeManager private constructor(
 
     suspend fun handleMethod(method: String, args: Map<String, Any?>): Any? {
         val canonicalArgs = AcpSessionCompatibility.canonicalize(method, args)
+        if (method in MC_CLOUD_ROUTED_METHODS && mcCloudAcpSessionAdapter.ownsSession(canonicalArgs)) {
+            return when (method) {
+                "session/load", "session/resume" -> mcCloudAcpSessionAdapter.loadSession(canonicalArgs)
+                "session/prompt" -> mcCloudAcpSessionAdapter.promptSession(canonicalArgs)
+                "session/cancel" -> mcCloudAcpSessionAdapter.cancelSession(canonicalArgs)
+                else -> error("Unsupported McCloud ACP method: $method")
+            }
+        }
         if (method == "agent/config/read") {
             return readAgentConfig(canonicalArgs)
         }
@@ -583,7 +599,13 @@ class AgentRuntimeManager private constructor(
                 activeRuntime = AgentRuntimeKind.LOCAL
                 activeLocalDistributionId = TerminalDistribution.selected().id
             }
-            return response
+            return if (method == "session/list") {
+                listAllAcpSessions(canonicalArgs) {
+                    (response as? Map<String, Any?> ?: emptyMap()).withAcpSessions()
+                }
+            } else {
+                response
+            }
         }
         if (
             method == "model/list" &&
@@ -630,7 +652,9 @@ class AgentRuntimeManager private constructor(
                 // The canonical list method is attempted first. The fallback
                 // keeps old bridges usable without making the host advertise
                 // a second, private transport.
-                "session/list" -> return listRemoteAcpSessions(canonicalArgs)
+                "session/list" -> return listAllAcpSessions(canonicalArgs) {
+                    listRemoteAcpSessions(canonicalArgs)
+                }
                 "session/prompt" -> return promptRemoteAcpSession(canonicalArgs)
                 "session/cancel" -> return cancelRemoteAcpSession(canonicalArgs)
             }
@@ -645,7 +669,9 @@ class AgentRuntimeManager private constructor(
             "session/load",
             "session/resume" -> requestWithResolvedThread("thread/resume", canonicalArgs)
                 .withAcpSessionId()
-            "session/list" -> listThreads(canonicalArgs).withAcpSessions()
+            "session/list" -> listAllAcpSessions(canonicalArgs) {
+                listThreads(canonicalArgs).withAcpSessions()
+            }
             "session/prompt" -> startTurn(canonicalArgs).withAcpSessionId()
             "session/cancel" -> interruptTurn(canonicalArgs).withAcpSessionId()
             "session/archive" -> archiveThread(canonicalArgs, archived = true)
@@ -765,6 +791,23 @@ class AgentRuntimeManager private constructor(
             if (!isUnsupportedRemoteAcpMethod(error)) throw error
             listThreads(args).withAcpSessions()
         }
+    }
+
+    private suspend fun listAllAcpSessions(
+        args: Map<String, Any?>,
+        listAgentSessions: suspend () -> Map<String, Any?>,
+    ): Map<String, Any?> = coroutineScope {
+        val agentRequest = async { runCatching { listAgentSessions() } }
+        val cloudRequest = async { runCatching { mcCloudAcpSessionAdapter.listSessions(args) } }
+        val agentSessions = agentRequest.await()
+        val cloudSessions = cloudRequest.await()
+        if (agentSessions.isFailure && cloudSessions.isFailure) {
+            throw agentSessions.exceptionOrNull() ?: cloudSessions.exceptionOrNull()!!
+        }
+        mcCloudAcpSessionAdapter.mergeSessions(
+            agentSessions.getOrNull(),
+            cloudSessions.getOrNull(),
+        )
     }
 
     private suspend fun promptRemoteAcpSession(
@@ -3266,6 +3309,12 @@ private val LOCAL_ACP_METHODS = setOf(
     "auth/providers/disable",
     "respondToServerRequest",
     "notifyAcpExtension"
+)
+private val MC_CLOUD_ROUTED_METHODS = setOf(
+    "session/load",
+    "session/resume",
+    "session/prompt",
+    "session/cancel",
 )
 
 /** ACP extension methods live in the implementation-reserved underscore namespace. */

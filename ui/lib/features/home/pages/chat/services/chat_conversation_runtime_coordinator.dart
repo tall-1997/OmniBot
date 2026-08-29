@@ -733,6 +733,18 @@ class ChatConversationRuntimeCoordinator extends ChangeNotifier {
     );
   }
 
+  void bindLoadedAcpSession({
+    required int conversationId,
+    required String mode,
+    required String sessionId,
+  }) {
+    final normalizedSessionId = sessionId.trim();
+    if (normalizedSessionId.isEmpty) return;
+    final runtime = ensureRuntime(conversationId: conversationId, mode: mode);
+    runtime.activeAcpSessionId = normalizedSessionId;
+    runtime.knownAcpSessionIds.add(normalizedSessionId);
+  }
+
   void replaceConversationSnapshot({
     required int conversationId,
     required String mode,

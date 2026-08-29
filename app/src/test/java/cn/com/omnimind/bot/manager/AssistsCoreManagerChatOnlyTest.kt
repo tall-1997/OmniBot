@@ -63,6 +63,41 @@ class AssistsCoreManagerChatOnlyTest {
     }
 
     @Test
+    fun `resolveDirectAgentModelOverride rejects locked provider profile`() {
+        val result = resolveDirectAgentModelOverride(
+            raw = mapOf(
+                "providerProfileId" to "monkeycode-locked",
+                "modelId" to "locked-model",
+            ),
+        ) {
+            ModelProviderProfile(
+                id = it,
+                name = "Locked cloud model",
+                baseUrl = "https://proxy.monkeycode-ai.com/v1",
+                sourceType = "monkeycode",
+                ready = false,
+            )
+        }
+
+        assertNull(result)
+    }
+
+    @Test
+    fun `resolveSynchronizedProviderModels returns cloud inventory without network discovery`() {
+        val models = resolveSynchronizedProviderModels(
+            ModelProviderProfile(
+                id = "monkeycode-cloud-1",
+                name = "Cloud model",
+                baseUrl = "https://proxy.monkeycode-ai.com/v1",
+                sourceType = "monkeycode",
+                modelIds = listOf("cloud-model-id"),
+            ),
+        )
+
+        assertEquals(listOf("cloud-model-id"), models?.map { it.id })
+    }
+
+    @Test
     fun `normalizeReasoningEffort accepts supported values only`() {
         assertEquals("no", normalizeReasoningEffort("no"))
         assertEquals("no", normalizeReasoningEffort(" NO "))

@@ -70,6 +70,8 @@ class ConversationThreadTarget {
       mode == ConversationMode.agent &&
       !isNewConversation &&
       (agentSessionId?.trim().isNotEmpty ?? false);
+  bool get isStandaloneAgentSessionTarget =>
+      isAgentSessionTarget && conversationId == null;
   bool get isRemoteCodexSessionTarget =>
       isAgentSessionTarget && (agentRuntime ?? '').trim() == 'remote';
 

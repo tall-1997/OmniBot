@@ -915,13 +915,19 @@ class AgentRuntimeService {
 
   static Future<Map<String, dynamic>> loadSession({
     String? sessionId,
+    String? runtime,
     int? conversationId,
     String? agentId,
     String? conversationMode,
     List<String> additionalDirectories = const <String>[],
   }) {
+    final normalizedRuntime = runtime?.trim();
+    final adapterSessionId = _adapterSessionId(sessionId, normalizedRuntime);
     return _invokeMap('session/load', {
-      if (sessionId != null) 'sessionId': sessionId,
+      if (adapterSessionId != null && adapterSessionId.isNotEmpty)
+        'sessionId': adapterSessionId,
+      if (normalizedRuntime != null && normalizedRuntime.isNotEmpty)
+        'runtime': normalizedRuntime,
       if (conversationId != null) 'conversationId': conversationId,
       if (agentId != null && agentId.trim().isNotEmpty)
         'agentId': agentId.trim(),
@@ -1156,6 +1162,7 @@ class AgentRuntimeService {
 
   static Future<Map<String, dynamic>> promptSession({
     String? sessionId,
+    String? runtime,
     int? conversationId,
     String? requestId,
     String? agentId,
@@ -1171,8 +1178,10 @@ class AgentRuntimeService {
     String? conversationMode,
     Map<String, String>? terminalEnvironment,
   }) {
+    final adapterSessionId = _adapterSessionId(sessionId, runtime?.trim());
     return _invokeMap('session/prompt', {
-      if (sessionId != null) 'sessionId': sessionId,
+      if (adapterSessionId != null && adapterSessionId.isNotEmpty)
+        'sessionId': adapterSessionId,
       if (conversationId != null) 'conversationId': conversationId,
       if (requestId != null && requestId.trim().isNotEmpty)
         'requestId': requestId.trim(),
@@ -1197,14 +1206,28 @@ class AgentRuntimeService {
     });
   }
 
+  static String? _adapterSessionId(String? sessionId, String? runtime) {
+    final normalizedSessionId = sessionId?.trim();
+    if (runtime == 'mccloud' &&
+        normalizedSessionId != null &&
+        normalizedSessionId.isNotEmpty &&
+        !normalizedSessionId.startsWith('mccloud:')) {
+      return 'mccloud:$normalizedSessionId';
+    }
+    return normalizedSessionId;
+  }
+
   static Future<Map<String, dynamic>> cancelPrompt({
     String? sessionId,
+    String? runtime,
     int? conversationId,
     String? promptId,
     String? runId,
   }) {
+    final adapterSessionId = _adapterSessionId(sessionId, runtime?.trim());
     return _invokeMap('session/cancel', {
-      if (sessionId != null) 'sessionId': sessionId,
+      if (adapterSessionId != null && adapterSessionId.isNotEmpty)
+        'sessionId': adapterSessionId,
       if (conversationId != null) 'conversationId': conversationId,
       if (promptId != null) 'promptId': promptId,
       if (runId != null && runId.trim().isNotEmpty) 'runId': runId.trim(),

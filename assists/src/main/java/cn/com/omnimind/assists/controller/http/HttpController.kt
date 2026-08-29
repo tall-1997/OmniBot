@@ -1003,6 +1003,11 @@ object HttpController {
         }
         val selectedProfile = when {
             bindingApplied -> boundProfile
+            explicitBase != null -> MonkeyCodeCloudProvider.findOverrideProfile(
+                profiles = ModelProviderConfigStore.listProfiles(),
+                apiBase = explicitBase,
+                modelId = explicitResolvedModel,
+            )
             explicitBase == null && providerBase != null -> ModelProviderConfigStore.getEditingProfile()
             else -> null
         }
@@ -1068,10 +1073,12 @@ object HttpController {
             customHeaders = providerHeaders,
             providerProfileId = when {
                 bindingApplied -> boundProfile?.id
+                cloudCredential != null -> selectedProfile?.id
                 else -> null
             },
             providerProfileName = when {
                 bindingApplied -> boundProfile?.name
+                cloudCredential != null -> selectedProfile?.name
                 else -> null
             },
             routeTag = routeTag,

@@ -55,11 +55,11 @@ class McCloudTaskStreamManager(
 
     fun open(taskId: String, mode: String = "stream"): String {
         requireResourceId(taskId)
-        require(mode == "stream" || mode == "control") { "任务流模式无效" }
+        val initialMode = normalizeTaskStreamMode(mode)
         close(taskId)
         val generation = System.nanoTime()
         generations[taskId] = generation
-        connect(taskId, mode, generation, 0)
+        connect(taskId, initialMode, generation, 0)
         return taskId
     }
 
@@ -117,11 +117,12 @@ class McCloudTaskStreamManager(
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 sockets.remove(taskId, webSocket)
+                if (generations[taskId] != generation) return
                 if (code == 1000) {
                     generations.remove(taskId, generation)
                     emit(event("taskClosed", taskId, mapOf("code" to code)))
                 } else {
-                    reconnect(taskId, mode, generation, if (opened) 0 else attempt)
+                    reconnect(taskId, taskStreamReconnectMode(mode), generation, if (opened) 0 else attempt)
                 }
             }
 
@@ -134,7 +135,7 @@ class McCloudTaskStreamManager(
                     return
                 }
                 emit(event("taskDisconnected", taskId, mapOf("statusCode" to response?.code)))
-                reconnect(taskId, mode, generation, if (opened) 0 else attempt)
+                reconnect(taskId, taskStreamReconnectMode(mode), generation, if (opened) 0 else attempt)
             }
         })
         sockets[taskId] = socket
@@ -142,13 +143,14 @@ class McCloudTaskStreamManager(
 
     private fun reconnect(taskId: String, mode: String, generation: Long, attempt: Int) {
         if (generations[taskId] != generation) return
+        val reconnectMode = taskStreamReconnectMode(mode)
         val delayMillis = taskReconnectDelayMillis(attempt)
         emit(event("taskReconnecting", taskId, mapOf("delayMs" to delayMillis)))
         reconnects.remove(taskId)?.cancel(false)
         reconnects[taskId] = scheduler.schedule(
             {
                 reconnects.remove(taskId)
-                connect(taskId, mode, generation, attempt + 1)
+                connect(taskId, reconnectMode, generation, attempt + 1)
             },
             delayMillis,
             TimeUnit.MILLISECONDS,
@@ -161,6 +163,17 @@ class McCloudTaskStreamManager(
     private fun isTaskEnded(text: String): Boolean = runCatching {
         Gson().fromJson(text, JsonObject::class.java).get("type")?.asString == "task-ended"
     }.getOrDefault(false)
+}
+
+internal fun normalizeTaskStreamMode(mode: String): String = when (mode) {
+    "stream", "attach" -> "attach"
+    "new", "control" -> mode
+    else -> throw IllegalArgumentException("任务流模式无效")
+}
+
+internal fun taskStreamReconnectMode(mode: String): String = when (mode) {
+    "new" -> "attach"
+    else -> normalizeTaskStreamMode(mode)
 }
 
 data class McCloudUploadedAttachment(val url: String, val filename: String)

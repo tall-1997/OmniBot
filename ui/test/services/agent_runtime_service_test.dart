@@ -32,6 +32,69 @@ void main() {
     );
   });
 
+  test('loadSession forwards the selected runtime adapter', () async {
+    MethodCall? capturedCall;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      capturedCall = call;
+      return <String, dynamic>{'threadId': 'cloud-task-1'};
+    });
+
+    await AgentRuntimeService.loadSession(
+      sessionId: 'cloud-task-1',
+      runtime: 'mccloud',
+      conversationMode: 'agent',
+    );
+
+    expect(capturedCall?.method, 'session/load');
+    expect(capturedCall?.arguments, <String, dynamic>{
+      'sessionId': 'mccloud:cloud-task-1',
+      'runtime': 'mccloud',
+      'conversationMode': 'agent',
+    });
+  });
+
+  test('mccloud prompt uses only canonical cloud session arguments', () async {
+    MethodCall? capturedCall;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      capturedCall = call;
+      return <String, dynamic>{'threadId': 'mccloud:task-1'};
+    });
+
+    await AgentRuntimeService.promptSession(
+      sessionId: 'task-1',
+      runtime: 'mccloud',
+      requestId: 'request-1',
+      text: '继续处理',
+    );
+
+    expect(capturedCall?.method, 'session/prompt');
+    expect(capturedCall?.arguments, <String, dynamic>{
+      'sessionId': 'mccloud:task-1',
+      'requestId': 'request-1',
+      'text': '继续处理',
+    });
+  });
+
+  test('mccloud cancel uses the canonical cloud session id', () async {
+    MethodCall? capturedCall;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      capturedCall = call;
+      return <String, dynamic>{'ok': true};
+    });
+
+    await AgentRuntimeService.cancelPrompt(
+      sessionId: 'task-1',
+      runtime: 'mccloud',
+      promptId: 'turn-1',
+    );
+
+    expect(capturedCall?.method, 'session/cancel');
+    expect(capturedCall?.arguments, <String, dynamic>{
+      'sessionId': 'mccloud:task-1',
+      'promptId': 'turn-1',
+    });
+  });
+
   test('parses the live status bundled with an agent switch response', () {
     final catalog = AcpAgentCatalog.fromMap(<String, dynamic>{
       'selectedAgentId': 'claude-code',

@@ -13,9 +13,7 @@ data class MonkeyCodeCloudCredential(
 ) {
     init {
         require(keyId.isNotBlank()) { "MonkeyCode cloud key id is empty" }
-        require(apiKey.startsWith("omk-") && apiKey.length > 4) {
-            "MonkeyCode cloud API key is invalid"
-        }
+        require(apiKey.isNotBlank()) { "MonkeyCode cloud API key is empty" }
         require(signingSecret.isNotBlank()) { "MonkeyCode cloud signing secret is empty" }
     }
 }
@@ -104,12 +102,59 @@ object MonkeyCodeCloudProvider {
                         proxyBaseUrl = proxyBaseUrl,
                         interfaceType = descriptor.interfaceType,
                         locked = descriptor.locked,
-                    ),
+                    ).copy(modelIds = listOf(model)),
                     modelId = model,
                     ownerType = ownerType,
                     locked = descriptor.locked,
                 )
             }.getOrNull()
+        }
+    }
+
+    fun inventoryModels(profile: ModelProviderProfile): List<ProviderModelOption> {
+        if (!isCloudSource(profile.sourceType) || !profile.ready) return emptyList()
+        return profile.modelIds.map { modelId ->
+            ProviderModelOption(
+                id = modelId,
+                displayName = profile.name,
+                ownedBy = SOURCE_TYPE,
+            )
+        }
+    }
+
+    fun synchronizeProfile(
+        profile: ModelProviderProfile,
+        previous: ModelProviderProfile?,
+    ): ModelProviderProfile {
+        val unchanged = previous != null &&
+            profile.name == previous.name &&
+            profile.baseUrl == previous.baseUrl &&
+            profile.sourceType == previous.sourceType &&
+            profile.readOnly == previous.readOnly &&
+            profile.ready == previous.ready &&
+            profile.statusText == previous.statusText &&
+            profile.protocolType == previous.protocolType &&
+            profile.wireApi == previous.wireApi &&
+            profile.modelIds == previous.modelIds
+        return profile.copy(
+            revision = if (unchanged) {
+                previous.revision
+            } else {
+                (previous?.revision ?: 0L) + 1L
+            },
+        )
+    }
+
+    fun findOverrideProfile(
+        profiles: List<ModelProviderProfile>,
+        apiBase: String?,
+        modelId: String?,
+    ): ModelProviderProfile? {
+        val normalizedModel = modelId?.trim()?.takeIf(String::isNotEmpty) ?: return null
+        return profiles.firstOrNull { profile ->
+            isCloudSource(profile.sourceType) &&
+                ModelProviderConfigStore.sameCanonicalEndpoint(profile.baseUrl, apiBase.orEmpty()) &&
+                normalizedModel in profile.modelIds
         }
     }
 

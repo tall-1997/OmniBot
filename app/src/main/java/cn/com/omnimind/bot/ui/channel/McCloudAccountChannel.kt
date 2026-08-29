@@ -383,6 +383,9 @@ class McCloudAccountChannel : EventChannel.StreamHandler {
         val retained = existing.filterNot { profile ->
             MonkeyCodeCloudProvider.isCloudSource(profile.sourceType)
         }
+        val existingCloudById = existing
+            .filter { profile -> MonkeyCodeCloudProvider.isCloudSource(profile.sourceType) }
+            .associateBy { it.id }
         val cloud = MonkeyCodeCloudProvider.projectModels(
             models.map { model ->
                 MonkeyCodeCloudModelDescriptor(
@@ -396,7 +399,12 @@ class McCloudAccountChannel : EventChannel.StreamHandler {
                 )
             },
             MonkeyCodeCloudProvider.DEFAULT_PROXY_BASE_URL,
-        ).map { it.profile }
+        ).map { projection ->
+            MonkeyCodeCloudProvider.synchronizeProfile(
+                profile = projection.profile,
+                previous = existingCloudById[projection.profile.id],
+            )
+        }
         val existingCloudIds = existing.filter { profile ->
             MonkeyCodeCloudProvider.isCloudSource(profile.sourceType)
         }.map { it.id }

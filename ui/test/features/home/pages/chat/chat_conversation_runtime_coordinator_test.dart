@@ -68,16 +68,6 @@ void main() {
     );
   }
 
-  Future<void> emitPlatformEvent(String method, [dynamic arguments]) async {
-    await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .handlePlatformMessage(
-          channelName,
-          codec.encodeMethodCall(MethodCall(method, arguments)),
-          (ByteData? _) {},
-        );
-    await Future<void>.delayed(Duration.zero);
-  }
-
   setUp(() async {
     coordinator.resetForTest();
     await VoicePlaybackCoordinator.instance.debugResetForTest();
@@ -97,6 +87,31 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(voiceChannel, (call) async => true);
     coordinator.ensureInitialized();
+  });
+
+  test('loaded ACP session is available for identity-only events', () {
+    coordinator.ensureEphemeralRuntime(
+      conversationId: -42,
+      mode: kChatRuntimeModeAgent,
+    );
+
+    coordinator.bindLoadedAcpSession(
+      conversationId: -42,
+      mode: kChatRuntimeModeAgent,
+      sessionId: 'mccloud:task-42',
+    );
+
+    expect(
+      coordinator.conversationIdForAcpEvent(sessionId: 'mccloud:task-42'),
+      -42,
+    );
+    expect(
+      coordinator.modeForAcpEvent(
+        conversationId: -42,
+        sessionId: 'mccloud:task-42',
+      ),
+      kChatRuntimeModeAgent,
+    );
   });
 
   tearDown(() async {
